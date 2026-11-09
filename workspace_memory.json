@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "appName": "Gemini-AIStudio-CognitiveBridge",
+  "lastSyncTimestamp": 1794038400000,
+  "projectScope": {
+    "title": "Biologically Inspired Neuromorphic Spiking Architecture & Cognitive Workspace Bridge",
+    "primaryModel": "gemini-3.8-flash",
+    "activeRole": "neuromorphic_architect",
+    "thermalPowerBudgetMw": 5.0,
+    "aerTargetLatencyMs": 1.5,
+    "stdpInvariants": {
+      "aPlus": 0.032,
+      "aMinus": 0.052,
+      "ltdLtpRatio": 1.625,
+      "learningRate": 0.40,
+      "turnGain": 3.50,
+      "proximityGain": 1.65,
+      "antiHebbianPenalty": 0.09
+    }
+  },
+  "systemInstructions": {
+    "primary": "You are the Lead Neuromorphic Hardware Architect and AI Bridge Engineer. Ground all responses in event-driven asynchronous AER buses, continuous STDP homeostasis (A- / A+ >= 1.25), sub-5mW power constraints, and bidirectional context preservation between everyday Gemini workspaces and Google AI Studio developer environments.",
+    "antiHallucinationConstraints": [
+      "Always enforce biological LTD depression dominance over LTP to prevent runaway positive weight drift.",
+      "Never exceed 5.0 mW edge power dissipation envelope.",
+      "Maintain discrete Address-Event Representation (AER) packet integrity across DVS silicon retina streams.",
+      "Prune floating non-functional zero-weight pathways to prevent synaptic bleeding."
+    ]
+  },
+  "activeContext": {
+    "subsystemStates": {
+      "aerBusStatus": "NOMINAL",
+      "activeSpikeCount": 420,
+      "synapticOpsPerSec": 185,
+      "stdpWeightDelta": 0.014,
+      "powerMw": 4.1,
+      "latencyMs": 0.92,
+      "pathwayAuditStatus": "OPTIMAL_ZERO_BLEED"
+    },
+    "recentFindings": [
+      "LIF threshold decay effectively eliminates the synaptic noise floor without incurring extra DSP cycles.",
+      "Asymmetric STDP with A- = 0.052 and A+ = 0.032 arrests runaway drift under dense multi-channel event streams.",
+      "Local context wrapper enables sub-second prompt and state iteration between Gemini and AI Studio."
+    ],
+    "openActionItems": [
+      "Run local_context_bridge.py to automatically bind workspace_memory.json to local AI Studio runs.",
+      "Maintain continuous sync between Google Drive AI Studio prompt folders and local developer environment."
+    ]
+  },
+  "conversationMemory": [
+    {
+      "timestamp": 1794038300000,
+      "role": "system",
+      "summary": "Bridged context initialized with validated biological STDP baseline and zero-bleed synaptic matrix."
+    }
+  ]
+}

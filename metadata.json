@@ -1,0 +1,6 @@
+{
+  "name": "SynapseEdge - Bio-Inspired Neuromorphic Processor",
+  "description": "Biological-inspired spiking neural network signal processing with low-latency synaptic plasticity, embedded edge hardware power profiling, asynchronous AER event stream processing, and Gemini AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
