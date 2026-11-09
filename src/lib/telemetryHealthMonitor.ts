@@ -162,10 +162,16 @@ export function analyzeDivergenceOrigin(params: {
     verdictSummary = `SUB-CRITICAL SIGNAL EXTINCTION & OVER-DAMPED LTD VERIFIED (Origin: ${primaryOrigin.toUpperCase()}): Over-damped LTD ratio (${ltdLtpRatio.toFixed(2)}) and negative rate deviation (${rateDelta.toFixed(1)} Hz) suppressed cortical branching (σ = ${branchingRatio.toFixed(2)}) and collapsed spectral SNR (${snrDb.toFixed(1)} dB).`;
     recommendedIntervention =
       'Relax excessive LTD depression toward 1.25 target, recalibrate feedforward association gains, and boost afferent signal amplitude above background Poisson noise.';
-  } else if (ltdLtpRatio < 1.15 || branchingRatio > 1.15 || rateDelta > 5.0) {
-    verdictSummary = `SYNAPTIC MATRIX RUNAWAY POTENTIATION (LTP Dominance): Divergence originated in ${primaryOrigin} (DRI ${dri.toFixed(2)}, LTD ratio ${ltdLtpRatio.toFixed(2)}). Runaway excitation precipitated downstream cortical bursts.`;
+  } else if (ltdLtpRatio < 1.15 || branchingRatio > 1.15) {
+    // True LTP dominance: plasticity balance or branching actually indicates runaway excitation.
+    verdictSummary = `SYNAPTIC MATRIX RUNAWAY POTENTIATION (LTP Dominance): Divergence originated in ${primaryOrigin} (DRI ${dri.toFixed(2)}, LTD ratio ${ltdLtpRatio.toFixed(2)}, σ = ${branchingRatio.toFixed(2)}). Runaway excitation precipitated downstream cortical bursts.`;
     recommendedIntervention =
       'Apply Hard-Locked stability plank: Enforce LTD dominance (A- >= 1.25 * A+) and dampen associative learning rate to 0.35.';
+  } else if (rateDelta > 5.0) {
+    // Rate excursion only: LTD/LTP and branching are within safe bounds, so do not blame plasticity.
+    verdictSummary = `HYPER-ACTIVE RATE EXCURSION (+${rateDelta.toFixed(1)} Hz above ${targetRateHz} Hz setpoint): Plasticity balance is within bounds (LTD/LTP = ${ltdLtpRatio.toFixed(2)}, σ = ${branchingRatio.toFixed(2)}), so the excursion is attributed to the rate homeostasis loop rather than LTP dominance. Highest-ranked risk origin: ${primaryOrigin} (DRI ${dri.toFixed(2)}).`;
+    recommendedIntervention =
+      'Raise LIF threshold damping per the homeostatic loop assessment. Leave the LTD/LTP ratio unchanged unless it leaves its safe range.';
   } else {
     verdictSummary = `HOMEOSTATIC EQUILIBRIUM NOMINAL: All subsystems operating within critical branching (σ = ${branchingRatio.toFixed(2)}) and STDP stability bounds (LTD/LTP = ${ltdLtpRatio.toFixed(2)}).`;
     recommendedIntervention = 'No intervention required. Maintain 100 Hz telemetry polling.';
@@ -783,6 +789,7 @@ export class TelemetryHealthCheckMonitor {
       !homeostaticLoopAssessment.isRateLoopDestabilized &&
       originVerdict.verdictSummary.startsWith('HOMEOSTATIC EQUILIBRIUM NOMINAL');
 
+    // Heuristic severity score (62 + maxRisk * 34), not a statistical confidence in the attribution.
     const confidencePct = isNominalEquilibrium
       ? 95
       : Math.round(Math.min(96, 62 + maxRisk * 34));

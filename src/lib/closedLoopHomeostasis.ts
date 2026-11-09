@@ -141,7 +141,9 @@ export function stepClosedLoopHomeostasis(
     (state.signalToNoiseRatioDb + (targetSnrDb - state.signalToNoiseRatioDb) * 0.18).toFixed(1)
   );
 
-  // 4. Enforce Strict Sub-5mW Thermal Power Envelope (8.2 pJ/SOP baseline + static leakage)
+  // 4. Enforce Strict Sub-5mW Thermal Power Envelope.
+  // NOTE: simulation model, not a measurement: 3.6 mW static floor + 0.85 mW per 1800 SOP/s.
+  // It is not derived from the 8.2 pJ/SOP figure (that would give ~nW at these rates).
   const dynamicPowerMw = 3.6 + (nextSopPerSec / 1800) * 0.85;
   const nextPowerMw = Number(Math.min(maxPowerMw - 0.1, dynamicPowerMw).toFixed(2));
 

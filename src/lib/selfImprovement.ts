@@ -120,11 +120,20 @@ export class AntiDivergenceEngine {
     if (maxVal === burstSynchronyRisk && burstSynchronyRisk > 0.25) {
       primaryRiskFactor = 'Runaway Synchronous Burst & AER Congestion Divergence';
     } else if (maxVal === weightSaturationRisk && weightSaturationRisk > 0.25) {
-      primaryRiskFactor = 'Synaptic Plasticity Saturation / STDP Drift Divergence';
+      // Distinguish genuinely pinned weights from risk that comes mostly from STDP update activity.
+      primaryRiskFactor =
+        saturationRatio * 2.2 >= stdpDriftRisk * 0.35
+          ? 'Synaptic Plasticity Saturation / STDP Drift Divergence'
+          : 'STDP Update-Activity Load (weights not saturated)';
     } else if (maxVal === keelInstabilityRisk && keelInstabilityRisk > 0.25) {
       primaryRiskFactor = 'Substrate Valence Collapse / Dorsal Trauma Divergence';
     } else if (maxVal === firingRateRisk && firingRateRisk > 0.25) {
       primaryRiskFactor = 'Mean Spiking Frequency Non-Homeostasis';
+    }
+
+    // DRI is a weighted sum plus invariant penalties, so it can cross 0.25 while no single vector does.
+    if (primaryRiskFactor === 'Nominal Biological Equilibrium' && dri >= 0.25) {
+      primaryRiskFactor = 'Cumulative Low-Grade Risk (no single vector > 0.25)';
     }
 
     let status: 'nominal' | 'caution' | 'diverging' | 'critical' = 'nominal';
