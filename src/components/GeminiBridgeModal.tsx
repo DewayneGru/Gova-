@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { HardwareTelemetry, SNNTuningConfig, SynapticDriftGuardSnapshot } from '../types';
 import { GoogleDriveWorkspacePanel } from './GoogleDriveWorkspacePanel';
+import { useAuth } from '../context/AuthContext';
 
 interface GeminiBridgeModalProps {
   isOpen: boolean;
@@ -49,6 +50,7 @@ export const GeminiBridgeModal: React.FC<GeminiBridgeModalProps> = ({
   onNavigateToWatchdogStudio,
   initialTab = 'overview',
 }) => {
+  const { getFreshIdToken } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'builder_watchdog' | 'local_wrapper' | 'drive_sync' | 'memory_json'>(initialTab);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -103,9 +105,11 @@ export const GeminiBridgeModal: React.FC<GeminiBridgeModalProps> = ({
         },
       };
 
+      const token = await getFreshIdToken();
+      if (!token) throw new Error('Sign in to sync the bridge');
       const res = await fetch('/api/bridge/sync', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       });
 

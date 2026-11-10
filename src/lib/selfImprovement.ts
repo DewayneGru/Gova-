@@ -439,7 +439,7 @@ export class AntiDivergenceEngine {
       ],
     };
 
-    return {
+    const payload: StandardizedSparkBenchmarkReportPayload = {
       reportId: `spark_eval_hook_${Date.now()}_ep${params.epochNumber}`,
       timestamp: Date.now(),
       epochNumber: params.epochNumber,
@@ -459,7 +459,41 @@ export class AntiDivergenceEngine {
       projectedDivergenceRisk: projectedDri,
       synthesizedRsiEpoch: epoch,
     };
+
+    for (const listener of this.evaluationHookListeners) {
+      try {
+        listener(payload);
+      } catch {
+        // Ignore subscriber error
+      }
+    }
+
+    return payload;
   }
+
+  private static evaluationHookListeners: Set<
+    (payload: StandardizedSparkBenchmarkReportPayload) => void
+  > = new Set();
+
+  /**
+   * Registers a standardized evaluation hook callback (`registerEvaluationHook`) or submits
+   * a Spark Agent benchmark result + telemetry snapshot + invariant compliance status
+   * directly to `AntiDivergenceEngine` for data-driven auto-remodeling.
+   */
+  static registerEvaluationHook(
+    listener: (payload: StandardizedSparkBenchmarkReportPayload) => void
+  ): () => void {
+    this.evaluationHookListeners.add(listener);
+    return () => {
+      this.evaluationHookListeners.delete(listener);
+    };
+  }
+}
+
+export function registerEvaluationHook(
+  listener: (payload: StandardizedSparkBenchmarkReportPayload) => void
+): () => void {
+  return AntiDivergenceEngine.registerEvaluationHook(listener);
 }
 
 /**

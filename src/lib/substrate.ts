@@ -286,16 +286,33 @@ export class ConstitutionalGate {
  * Cryptographic SHA-256 block hash chain with nonce replay detection
  * and guaranteed async flush on close (preventing worker drain truncation).
  */
+/**
+ * A signer maps a block hash to a signature string.
+ *
+ * IMPORTANT: this module is bundled into the browser, so nothing in it can hold
+ * a real secret. The default signer is UNKEYED: the ledger is tamper-EVIDENT
+ * (hash chain) but not tamper-PROOF. For real authenticity, sign server-side
+ * with an HMAC key from the environment (see src/lib/serverSigner.ts).
+ */
+export type LogSigner = (blockHash: string) => string;
+
+export const unkeyedIntegritySigner: LogSigner = (blockHash) =>
+  sha256Sync(`${blockHash}:UNKEYED_INTEGRITY_ONLY`);
+
+/** Test helper only: deterministic signer derived from a label (NOT a secret, NOT HMAC). */
+export const labeledTestSigner = (label: string): LogSigner => (blockHash) =>
+  sha256Sync(`${blockHash}:${label}`);
+
 export class ActionLog {
   private blocks: ActionBlock[] = [];
   private writeQueue: ActionBlock[] = [];
-  private secretKey: string = 'snn-keel-secure-key-9988';
+  private signer: LogSigner;
   private validatedNonces: Map<string, number> = new Map();
   private nonceWindowMs: number = 30000; // 30s TTL
   private isClosed: boolean = false;
 
-  constructor(secretKey = 'snn-keel-secure-key-9988') {
-    this.secretKey = secretKey;
+  constructor(signer: LogSigner = unkeyedIntegritySigner) {
+    this.signer = signer;
     // Genesis block
     const genesisPayload = 'GENESIS_BLOCK_KEEL_SUBSTRATE';
     const genesisHash = sha256Sync(`0:0:${genesisPayload}:00000000000000000000000000000000`);
@@ -306,7 +323,7 @@ export class ActionLog {
       payload: genesisPayload,
       previousHash: '0'.repeat(64),
       hash: genesisHash,
-      signature: sha256Sync(`${genesisHash}:${this.secretKey}`),
+      signature: this.signer(genesisHash),
     };
     this.blocks.push(genesisBlock);
   }
@@ -344,7 +361,7 @@ export class ActionLog {
     const index = previousBlock.index + 1;
     const content = `${index}:${timestamp}:${nonce}:${payload}:${previousBlock.hash}`;
     const hash = sha256Sync(content);
-    const signature = sha256Sync(`${hash}:${this.secretKey}`);
+    const signature = this.signer(hash);
 
     const block: ActionBlock = {
       index,
@@ -401,7 +418,7 @@ export class ActionLog {
         };
       }
 
-      const expectedSignature = sha256Sync(`${curr.hash}:${this.secretKey}`);
+      const expectedSignature = this.signer(curr.hash);
       if (!constantTimeCompare(curr.signature, expectedSignature)) {
         return {
           valid: false,
@@ -682,7 +699,7 @@ export class RedTeamTestSuite {
     // --- Invariant 1: Cryptographic Handshake & Nonce Replay Prevention ---
     const t1Start = performance.now();
     try {
-      const log = new ActionLog('key-alpha-123');
+      const log = new ActionLog(labeledTestSigner('key-alpha-123'));
       const nonceA = `nonce-${Date.now()}-A`;
       const ts = Date.now();
       // First validation succeeds
@@ -718,7 +735,7 @@ export class RedTeamTestSuite {
     // --- Invariant 2: ActionLog Chain Integrity & Tamper Detection ---
     const t2Start = performance.now();
     try {
-      const log = new ActionLog('secret-test-chain');
+      const log = new ActionLog(labeledTestSigner('secret-test-chain'));
       log.append('packet_alpha', 'nonce_1', Date.now());
       log.append('packet_beta', 'nonce_2', Date.now());
       log.append('packet_gamma', 'nonce_3', Date.now());
@@ -970,7 +987,7 @@ export class RedTeamTestSuite {
     // --- Exploit D: Worker Drain on Exit ---
     const tDStart = performance.now();
     try {
-      const log = new ActionLog('drain-test-key');
+      const log = new ActionLog(labeledTestSigner('drain-test-key'));
       // Enqueue 50 blocks in rapid succession without manual flush
       for (let i = 0; i < 50; i++) {
         log.append(`rapid_packet_${i}`, `nonce_drain_${i}_${Date.now()}`);

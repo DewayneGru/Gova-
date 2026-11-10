@@ -64,7 +64,11 @@ import {
   INITIAL_LOGIC_FLOW_AUDIT_LOG,
 } from '../lib/synapseEdgeWatchdog';
 import { SNNEngine } from '../lib/snnEngine';
-import { AntiDivergenceEngine } from '../lib/selfImprovement';
+import { AntiDivergenceEngine, registerEvaluationHook } from '../lib/selfImprovement';
+import {
+  runStabilityBenchmark,
+  StabilityBenchmark500TickResult,
+} from '../lib/watchdogBenchmarks';
 import {
   stepBalancedHomeostasis,
   stepEdgeFirmwareAndKeelReflex,
@@ -109,6 +113,29 @@ export function useUnifiedSparkEvaluationHook(params: {
   const [hookEpochSequence, setHookEpochSequence] = useState<number>(1);
   const [reportedPayloads, setReportedPayloads] = useState<StandardizedSparkBenchmarkReportPayload[]>([]);
   const [isReportingHook, setIsReportingHook] = useState<boolean>(false);
+
+  // 500-Tick Shadow-Simulation Stability Benchmark (`runStabilityBenchmark`) & Periodic Watchdog Hook
+  const [stabilityBenchmark500Result, setStabilityBenchmark500Result] =
+    useState<StabilityBenchmark500TickResult>(() =>
+      runStabilityBenchmark({
+        currentTuning: activeTuning,
+        projectionGain: 3.5,
+        simulatePreCalibratedDrift: true,
+      })
+    );
+  const [isPeriodicBenchmarkActive, setIsPeriodicBenchmarkActive] = useState<boolean>(false);
+  const [lastApprovedRemodelAt, setLastApprovedRemodelAt] = useState<number | null>(null);
+
+  // Subscribe via `registerEvaluationHook` so any benchmark submission updates the self-improvement ledger
+  useEffect(() => {
+    const unsubscribe = registerEvaluationHook((payload) => {
+      setReportedPayloads((prev) => {
+        if (prev.some((p) => p.reportId === payload.reportId)) return prev;
+        return [payload, ...prev.slice(0, 14)];
+      });
+    });
+    return unsubscribe;
+  }, []);
 
   // Interactive Affective Substrate & Keel Stress-Test Harness (`KeelStressTester`)
   const keelTesterRef = React.useRef<KeelStressTester>(new KeelStressTester());
@@ -573,6 +600,52 @@ export function useUnifiedSparkEvaluationHook(params: {
     ]
   );
 
+  const handleRun500TickStabilityBenchmark = useCallback(
+    (simulateDrift: boolean = false) => {
+      const res = runStabilityBenchmark({
+        currentTuning: activeTuning,
+        currentTelemetry: engine?.getTelemetry(),
+        projectionGain: 3.5,
+        simulatePreCalibratedDrift: simulateDrift,
+      });
+      setStabilityBenchmark500Result(res);
+      reportBenchmarkToSelfImprovementEngine(false);
+    },
+    [activeTuning, engine, reportBenchmarkToSelfImprovementEngine]
+  );
+
+  const handleApproveAndRemodelFromBenchmark = useCallback(() => {
+    const res = runStabilityBenchmark({
+      currentTuning: activeTuning,
+      currentTelemetry: engine?.getTelemetry(),
+      projectionGain: 3.5,
+      simulatePreCalibratedDrift: false,
+    });
+    setStabilityBenchmark500Result(res);
+    setLastApprovedRemodelAt(Date.now());
+
+    if (engine) {
+      engine.applyModelAdjustments(res.validatedTuningConfig);
+      engine.setCriticalityShuntEnabled(true);
+      engine.setLateralRingInhibitionEnabled(true);
+      engine.calibrateHomeostaticRateLoop();
+      engine.step();
+    }
+    if (onApplyAdjustments) {
+      onApplyAdjustments(res.validatedTuningConfig);
+    }
+    reportBenchmarkToSelfImprovementEngine(true);
+  }, [activeTuning, engine, onApplyAdjustments, reportBenchmarkToSelfImprovementEngine]);
+
+  // Periodic hook that runs `runStabilityBenchmark` and reports findings back to the self-improvement ledger
+  useEffect(() => {
+    if (!isPeriodicBenchmarkActive) return;
+    const timer = setInterval(() => {
+      handleRun500TickStabilityBenchmark(false);
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [isPeriodicBenchmarkActive, handleRun500TickStabilityBenchmark]);
+
   return {
     invariantMode,
     setInvariantMode,
@@ -593,6 +666,12 @@ export function useUnifiedSparkEvaluationHook(params: {
     personaPreviewPrompt,
     setPersonaPreviewPrompt,
     personaPreviewOutput,
+    stabilityBenchmark500Result,
+    isPeriodicBenchmarkActive,
+    setIsPeriodicBenchmarkActive,
+    lastApprovedRemodelAt,
+    handleRun500TickStabilityBenchmark,
+    handleApproveAndRemodelFromBenchmark,
   };
 }
 
@@ -723,6 +802,12 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
     personaPreviewPrompt,
     setPersonaPreviewPrompt,
     personaPreviewOutput,
+    stabilityBenchmark500Result,
+    isPeriodicBenchmarkActive,
+    setIsPeriodicBenchmarkActive,
+    lastApprovedRemodelAt,
+    handleRun500TickStabilityBenchmark,
+    handleApproveAndRemodelFromBenchmark,
   } = useUnifiedSparkEvaluationHook({
     benchmarkResult,
     ruleVersion,
@@ -2961,6 +3046,122 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                   : 'Report Standardized Benchmark to RSI Engine'}
               </span>
             </button>
+          </div>
+        </div>
+
+        {/* Benchmark Review Interface (`runStabilityBenchmark` 500-Tick Shadow Simulation + `Approve & Remodel` Button) */}
+        <div className="p-3.5 bg-slate-950 rounded-lg border border-emerald-500/40 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span className="text-xs font-bold text-white uppercase tracking-wider">
+                Benchmark Review &bull; 500-Tick Shadow Simulation (<code className="text-emerald-300">runStabilityBenchmark</code>)
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                {stabilityBenchmark500Result.passedInvariantsCount}/{stabilityBenchmark500Result.totalInvariantsCount} Hard-Plank Limits Verified ({stabilityBenchmark500Result.synapticStabilityIndexPct}%)
+              </span>
+              {lastApprovedRemodelAt && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                  Remodeled at {new Date(lastApprovedRemodelAt).toLocaleTimeString()}
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                onClick={() => handleRun500TickStabilityBenchmark(true)}
+                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 text-[10px] font-bold cursor-pointer transition-colors"
+              >
+                Run 500-Tick Shadow Benchmark
+              </button>
+              <button
+                onClick={() => setIsPeriodicBenchmarkActive(!isPeriodicBenchmarkActive)}
+                className={`px-2.5 py-1 rounded text-[10px] font-bold cursor-pointer transition-colors flex items-center gap-1 ${
+                  isPeriodicBenchmarkActive
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300'
+                }`}
+              >
+                {isPeriodicBenchmarkActive ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                <span>{isPeriodicBenchmarkActive ? 'Periodic Hook Active (6s)' : 'Start Periodic Benchmark Hook'}</span>
+              </button>
+              <button
+                onClick={handleApproveAndRemodelFromBenchmark}
+                className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold cursor-pointer shadow-lg shadow-emerald-900/40 flex items-center gap-1 transition-colors"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Approve &amp; Remodel</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-[11px]">
+            <div className="p-2.5 bg-slate-900/90 rounded border border-slate-800">
+              <div className="text-[10px] text-slate-400">Branching Ratio (&sigma;)</div>
+              <div className="text-sm font-black text-emerald-300 mt-0.5">
+                {stabilityBenchmark500Result.branchingRatioBefore.toFixed(3)} &rarr;{' '}
+                {stabilityBenchmark500Result.branchingRatioAfter.toFixed(3)}
+              </div>
+              <div className="text-[9px] text-slate-500">wt=2.85 &bull; afferent=1.35</div>
+            </div>
+
+            <div className="p-2.5 bg-slate-900/90 rounded border border-slate-800">
+              <div className="text-[10px] text-slate-400">STDP A-/A+ Plank</div>
+              <div className="text-sm font-black text-indigo-300 mt-0.5">
+                {stabilityBenchmark500Result.firmwareStateAfter.stdp_a_plus.toFixed(3)} /{' '}
+                {stabilityBenchmark500Result.firmwareStateAfter.stdp_a_minus.toFixed(3)} (
+                {stabilityBenchmark500Result.ltdLtpRatioAfter.toFixed(2)}x)
+              </div>
+              <div className="text-[9px] text-slate-500">&ge; 1.25 Hard Plank (3.5 Gain)</div>
+            </div>
+
+            <div className="p-2.5 bg-slate-900/90 rounded border border-slate-800">
+              <div className="text-[10px] text-slate-400">Learning Rate (&eta;)</div>
+              <div className="text-sm font-black text-sky-300 mt-0.5">
+                {stabilityBenchmark500Result.firmwareStateBefore.learning_rate_eta.toFixed(2)} &rarr;{' '}
+                {stabilityBenchmark500Result.firmwareStateAfter.learning_rate_eta.toFixed(2)}
+              </div>
+              <div className="text-[9px] text-slate-500">Capped &le; 0.55 Hard Plank</div>
+            </div>
+
+            <div className="p-2.5 bg-slate-900/90 rounded border border-slate-800">
+              <div className="text-[10px] text-slate-400">500-Tick DRI Trajectory</div>
+              <div className="text-sm font-black text-emerald-400 mt-0.5">
+                {stabilityBenchmark500Result.driBefore.toFixed(2)} &rarr;{' '}
+                {stabilityBenchmark500Result.driAfter.toFixed(2)}
+              </div>
+              <div className="text-[9px] text-slate-500">Monotonic Contraction (&le; 0.25)</div>
+            </div>
+
+            <div className="p-2.5 bg-slate-900/90 rounded border border-slate-800">
+              <div className="text-[10px] text-slate-400">Lyapunov (&lambda;)</div>
+              <div className="text-sm font-black text-amber-300 mt-0.5">
+                {stabilityBenchmark500Result.firmwareStateBefore.lyapunov_lambda.toFixed(3)} &rarr;{' '}
+                {stabilityBenchmark500Result.lyapunovExponentAfter.toFixed(3)}
+              </div>
+              <div className="text-[9px] text-slate-500">Contracting Phase Space (&lt; 0)</div>
+            </div>
+
+            <div className="p-2.5 bg-slate-900/90 rounded border border-slate-800">
+              <div className="text-[10px] text-slate-400">Validated Remodel Patch</div>
+              <div className="text-sm font-black text-cyan-300 mt-0.5">
+                {stabilityBenchmark500Result.meanFiringRateHzAfter} Hz &bull;{' '}
+                {stabilityBenchmark500Result.powerMwAfter} mW
+              </div>
+              <div className="text-[9px] text-slate-500">
+                AER: {stabilityBenchmark500Result.aerLatencyMsAfter} ms &bull; registerEvaluationHook
+              </div>
+            </div>
+          </div>
+
+          <div className="text-[10px] text-slate-300 bg-slate-900/80 px-3 py-2 rounded border border-slate-800 flex flex-wrap items-center justify-between gap-2">
+            <span>
+              <strong className="text-emerald-300">Spark Consensus:</strong>{' '}
+              {stabilityBenchmark500Result.sparkConsensusSummary}
+            </span>
+            <span className="text-indigo-300 font-semibold">
+              Hook: registerEvaluationHook &rarr; AntiDivergenceEngine
+            </span>
           </div>
         </div>
 

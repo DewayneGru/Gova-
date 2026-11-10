@@ -2955,9 +2955,17 @@ app.get("/api/bridge/context", (_req, res) => {
   }
 });
 
-app.post("/api/bridge/sync", (req, res) => {
+// Only these top-level keys may be written by a client. Everything else
+// (e.g. systemInstructions, version, $schema) stays server-controlled.
+const BRIDGE_SYNC_ALLOWED_KEYS = ["projectScope", "activeContext", "conversationMemory", "markdownState"];
+
+app.post("/api/bridge/sync", requireAuth, (req: AuthRequest, res) => {
   try {
-    const incomingData = req.body || {};
+    const rawBody = req.body && typeof req.body === "object" ? req.body : {};
+    const incomingData: Record<string, any> = {};
+    for (const key of BRIDGE_SYNC_ALLOWED_KEYS) {
+      if (key in rawBody) incomingData[key] = rawBody[key];
+    }
     let existingData: any = {};
     if (fs.existsSync(WORKSPACE_MEMORY_PATH)) {
       existingData = JSON.parse(fs.readFileSync(WORKSPACE_MEMORY_PATH, "utf-8"));
