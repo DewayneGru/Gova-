@@ -4,7 +4,7 @@
 ## 1. Project Scope & Architecture
 - **App Name:** Gemini-AIStudio-CognitiveBridge
 - **Title:** Biologically Inspired Neuromorphic Spiking Architecture & Cognitive Workspace Bridge
-- **Primary Model Alias:** `gemini-3.8-flash`
+- **Primary Model Alias:** `gemini-4-argon`
 - **Thermal Power Ceiling:** 5.0 mW
 - **Target AER Latency:** 1.5 ms
 

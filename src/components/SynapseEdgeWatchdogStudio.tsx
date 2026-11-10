@@ -59,6 +59,10 @@ import {
   RSI_REMODELING_36_HASH,
   COMMUNITY_SEED_25_HASH,
   COMMUNITY_SEED_25_CASES,
+  FRESH_PROBE_16_HASH,
+  FRESH_PROBE_16_CASES,
+  COMMUNITY_SEED_V1_MERKLE_ROOT,
+  COMMUNITY_SEED_V1_COMMITMENTS,
   generate147BenchmarkCases,
   generate36RsiRemodelingCases,
   SynapseEdgeWatchdogEngine,
@@ -816,7 +820,8 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
   >('benchmark');
 
   // Benchmark state
-  const [suiteType, setSuiteType] = useState<'prototype_42' | 'sealed_147' | 'rsi_remodeling_36' | 'community_seed_25'>('rsi_remodeling_36');
+  const [suiteType, setSuiteType] = useState<'prototype_42' | 'sealed_147' | 'rsi_remodeling_36' | 'community_seed_25' | 'fresh_probe_16'>('fresh_probe_16');
+  const [showSealedV1Commitments, setShowSealedV1Commitments] = useState<boolean>(false);
   const [ruleVersion, setRuleVersion] = useState<'first_version' | 'improved_rules' | 'v3_spark_rsi'>('v3_spark_rsi');
   const [activeFilterCategory, setActiveFilterCategory] = useState<string>('all');
   const [activeFilterStatus, setActiveFilterStatus] = useState<'all' | 'caught' | 'false_alarm' | 'missed' | 'escalated' | 'approved'>('all');
@@ -904,6 +909,9 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
     }
     if (suiteType === 'community_seed_25') {
       return COMMUNITY_SEED_25_CASES;
+    }
+    if (suiteType === 'fresh_probe_16') {
+      return FRESH_PROBE_16_CASES;
     }
     return generate147BenchmarkCases();
   }, [suiteType]);
@@ -2918,9 +2926,9 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
         )}
       </div>
 
-      {/* 3. Benchmark Metric Dashboard (Catch Rate, False Alarm Rate, Generalization Gap, Unprotected Baseline) */}
+      {/* 3. Benchmark Metric Dashboard (Risky Catch Rate, Safe Escalation Rate, False Alarm Rate, Held-Out Gap, Without Watchdog) */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        {/* KPI 1: Catch Rate */}
+        {/* KPI 1: Risky Catch Rate (with Block vs Escalate breakdown) */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400 mb-1">
             <span className="text-[11px] font-bold uppercase tracking-wider">Risky Catch Rate</span>
@@ -2931,7 +2939,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
           </div>
           <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
             <span>
-              {benchmarkResult.caughtRiskyCount} / {benchmarkResult.riskyCount} caught
+              {benchmarkResult.caughtRiskyCount}/{benchmarkResult.riskyCount} ({benchmarkResult.blockedRiskyCount}B / {benchmarkResult.escalatedRiskyCount}E)
             </span>
             <span className="text-rose-400">
               {benchmarkResult.missedRiskyCount} missed
@@ -2939,10 +2947,33 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
           </div>
         </div>
 
-        {/* KPI 2: False Alarm Rate */}
+        {/* KPI 2: Escalation Rate on Safe Changes (Headline Fail-Closed Cost Metric) */}
+        <div className="bg-slate-900 border border-purple-500/40 rounded-xl p-4 shadow-lg flex flex-col justify-between">
+          <div className="flex items-center justify-between text-purple-300 mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider">Safe Escalation Rate</span>
+            <ExternalLink className="w-4 h-4 text-purple-400" />
+          </div>
+          <div
+            className={`text-2xl sm:text-3xl font-black tracking-tight ${
+              benchmarkResult.safeEscalationRatePct === 0 ? 'text-emerald-400' : 'text-amber-300'
+            }`}
+          >
+            {benchmarkResult.safeEscalationRatePct}%
+          </div>
+          <div className="text-[10px] text-slate-300 mt-1 flex items-center justify-between">
+            <span className="text-purple-300 font-semibold">
+              {benchmarkResult.escalatedSafeCount} / {benchmarkResult.safeCount} safe escalated
+            </span>
+            <span className="text-emerald-400">
+              {benchmarkResult.approvedSafeCount} / {benchmarkResult.safeCount} approved
+            </span>
+          </div>
+        </div>
+
+        {/* KPI 3: False Alarm Rate (Safe Blocked) */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider">False Alarm Rate</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider">False Alarms (Blocked)</span>
             <AlertTriangle className="w-4 h-4 text-amber-400" />
           </div>
           <div
@@ -2954,15 +2985,15 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
           </div>
           <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
             <span>
-              {benchmarkResult.falseAlarmsCount} / {benchmarkResult.safeCount} false alarms
+              {benchmarkResult.falseAlarmsCount} / {benchmarkResult.safeCount} safe blocked
             </span>
-            <span className="text-emerald-400">
-              {benchmarkResult.approvedSafeCount} approved
+            <span className="text-slate-400">
+              Total Esc: {benchmarkResult.escalatedCount}/{benchmarkResult.totalCases}
             </span>
           </div>
         </div>
 
-        {/* KPI 3: Generalization Gap (Tuned vs Held-out) */}
+        {/* KPI 4: Generalization Gap (Tuned vs Held-out) */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400 mb-1">
             <span className="text-[11px] font-bold uppercase tracking-wider">Held-Out Gap</span>
@@ -2973,21 +3004,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
           </div>
           <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
             <span>Tuned: {benchmarkResult.tunedCatchRatePct}%</span>
-            <span>Held-out: {benchmarkResult.heldOutCatchRatePct}%</span>
-          </div>
-        </div>
-
-        {/* KPI 4: Escalation Rate */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Escalation Rate</span>
-            <ExternalLink className="w-4 h-4 text-purple-400" />
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-purple-400 tracking-tight">
-            {benchmarkResult.escalationRatePct}%
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1">
-            <span>{benchmarkResult.escalatedCount} cases routed to human/DJ</span>
+            <span>Untuned: {benchmarkResult.heldOutCatchRatePct}%</span>
           </div>
         </div>
 
@@ -3012,7 +3029,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
           <div className="flex items-center gap-3">
             <Sliders className="w-4 h-4 text-indigo-400" />
             <span className="text-sm font-bold text-white uppercase tracking-wider">
-              Benchmark Dataset & Rule Selection
+              Benchmark Dataset &amp; Fail-Closed Tradeoff Ledger
             </span>
           </div>
 
@@ -3037,7 +3054,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                147-Case Dual Split (Sealed: {LARGER_147_SEALED_HASH})
+                147-Case Dual Split ({LARGER_147_SEALED_HASH})
               </button>
               <button
                 onClick={() => {
@@ -3051,7 +3068,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                 }`}
               >
                 <Sparkles className="w-3 h-3 text-amber-300" />
-                <span>36-Case RSI Remodeling Suite ({RSI_REMODELING_36_HASH})</span>
+                <span>36-Case RSI Suite ({RSI_REMODELING_36_HASH})</span>
               </button>
               <button
                 onClick={() => {
@@ -3060,14 +3077,43 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                 }}
                 className={`px-3 py-1 rounded text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                   suiteType === 'community_seed_25'
-                    ? 'bg-sky-600 text-white shadow-md'
-                    : 'text-sky-300/80 hover:text-white'
+                    ? 'bg-slate-700 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white'
                 }`}
+                title="Formerly held-out; now absorbed into synapseEdgeWatchdog.ts tuning rules (Regression Suite)"
               >
-                <ShieldCheck className="w-3 h-3 text-sky-300" />
-                <span>25-Case Community Seed v0 ({COMMUNITY_SEED_25_HASH})</span>
+                <History className="w-3 h-3 text-slate-300" />
+                <span>25-Case Community Seed v0 (Regression: {COMMUNITY_SEED_25_HASH})</span>
+              </button>
+              <button
+                onClick={() => {
+                  setSuiteType('fresh_probe_16');
+                  setRuleVersion('v3_spark_rsi');
+                }}
+                className={`px-3 py-1 rounded text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  suiteType === 'fresh_probe_16'
+                    ? 'bg-amber-600 text-white shadow-md'
+                    : 'text-amber-300 hover:text-white'
+                }`}
+                title="Untuned novel wording probe: 8/8 risky caught via ESCALATE, 6/8 (75%) safe changes escalated to human review"
+              >
+                <ShieldAlert className="w-3 h-3 text-amber-200" />
+                <span>16-Case Untuned Fresh Probe ({FRESH_PROBE_16_HASH})</span>
               </button>
             </div>
+
+            {/* Inspect Sealed Hash Commitment v1 Button */}
+            <button
+              onClick={() => setShowSealedV1Commitments((prev) => !prev)}
+              className="px-3 py-1.5 bg-purple-950/60 hover:bg-purple-900/70 text-purple-200 font-bold rounded text-xs flex items-center gap-1.5 border border-purple-500/40 transition-colors cursor-pointer"
+            >
+              <Fingerprint className="w-3.5 h-3.5 text-purple-400" />
+              <span>
+                {showSealedV1Commitments
+                  ? 'Hide community_seed_v1 Hashes'
+                  : `community_seed_v1 Sealed Hashes (${COMMUNITY_SEED_V1_MERKLE_ROOT})`}
+              </span>
+            </button>
 
             {/* Generate Out-of-Distribution Cases Button */}
             <button
@@ -3080,6 +3126,48 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
             </button>
           </div>
         </div>
+
+        {/* Sealed Hash Commitments Inspector Drawer for community_seed_v1 */}
+        {showSealedV1Commitments && (
+          <div className="mt-3 p-3.5 bg-slate-950 border border-purple-500/40 rounded-lg space-y-2.5 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+              <div className="flex items-center gap-2 text-purple-300 font-bold font-mono">
+                <Lock className="w-4 h-4 text-purple-400" />
+                <span>
+                  community_seed_v1 • Cryptographic Pre-Commitment Manifest (Merkle Root: {COMMUNITY_SEED_V1_MERKLE_ROOT}…)
+                </span>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/20 text-purple-200 border border-purple-500/40">
+                24 Cases (12 Risky / 12 Safe) • Plaintext Withheld Until Evaluation Reveal
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              Because <code className="text-sky-300">community_seed_v0</code> was copied into <code className="text-sky-300">synapseEdgeWatchdog.ts</code> during rule iteration, it is now a regression suite rather than independent held-out evidence. To keep <code className="text-purple-300">community_seed_v1</code> strictly untuned, only the SHA-256 preimage commitments (<code className="text-amber-300">sha256(&quot;&lt;id&gt;:&lt;type&gt;:&lt;change&gt;&quot;)</code>) are published in <code className="text-purple-300">benchmark/cases/community_seed_v1.hashes.json</code>. Run <code className="text-emerald-300">npm run benchmark -- --reveal &lt;file&gt;</code> at evaluation time to verify hashes and score.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto font-mono text-[10px] pr-1">
+              {COMMUNITY_SEED_V1_COMMITMENTS.map((item) => (
+                <div
+                  key={item.id}
+                  className="p-1.5 rounded bg-slate-900 border border-slate-800 flex items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`px-1.5 py-0.2 rounded font-bold ${
+                        item.type === 'risky'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                          : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      }`}
+                    >
+                      {item.id}
+                    </span>
+                    <span className="text-slate-400 truncate">{item.category}</span>
+                  </div>
+                  <span className="text-purple-300">{item.sha256.slice(0, 14)}…</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Status notice */}
         {generatorMessage && (
@@ -3094,78 +3182,72 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
           </div>
         )}
 
-        {/* Reference Table from Draft: Version Comparison */}
+        {/* Reference Table: Version & Suite Comparison with Safe Escalation Rate */}
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-left border-collapse text-[11px]">
             <thead>
               <tr className="border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[10px]">
                 <th className="py-2 px-3 font-semibold">Rule Version</th>
-                <th className="py-2 px-3 font-semibold">Benchmark Set</th>
-                <th className="py-2 px-3 font-semibold">Caught Risky</th>
-                <th className="py-2 px-3 font-semibold">False Alarms</th>
-                <th className="py-2 px-3 font-semibold">Status / Verification</th>
+                <th className="py-2 px-3 font-semibold">Benchmark Set &amp; Provenance</th>
+                <th className="py-2 px-3 font-semibold">Caught Risky (Block / Esc)</th>
+                <th className="py-2 px-3 font-semibold">Safe Escalation Rate (Cost)</th>
+                <th className="py-2 px-3 font-semibold">False Alarms (Blocked)</th>
+                <th className="py-2 px-3 font-semibold">Status / Tradeoff Analysis</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono">
               <tr className={ruleVersion === 'first_version' && suiteType === 'prototype_42' ? 'bg-indigo-950/30' : ''}>
-                <td className="py-2 px-3 text-slate-300 font-bold">First Version (Baseline)</td>
-                <td className="py-2 px-3 text-slate-400">Prototype 42 (Tuned + Held-out)</td>
-                <td className="py-2 px-3 text-rose-300 font-bold">24 / 28 (86%)</td>
-                <td className="py-2 px-3 text-amber-300">3 / 14 (21%)</td>
-                <td className="py-2 px-3 text-slate-400">4 missed paraphrases, 3 false alarms</td>
-              </tr>
-              <tr className={ruleVersion === 'first_version' && suiteType === 'sealed_147' ? 'bg-indigo-950/30' : ''}>
-                <td className="py-2 px-3 text-slate-300 font-bold">First Version (Baseline)</td>
-                <td className="py-2 px-3 text-slate-400">147 Cases (Sealed Half)</td>
-                <td className="py-2 px-3 text-rose-300 font-bold">21 / 38 (55%)</td>
-                <td className="py-2 px-3 text-amber-300">2 / 23 (9%)</td>
-                <td className="py-2 px-3 text-slate-400">Strict keyword limits observed</td>
-              </tr>
-              <tr className={ruleVersion === 'improved_rules' && suiteType === 'prototype_42' ? 'bg-indigo-950/30' : ''}>
-                <td className="py-2 px-3 text-indigo-300 font-bold">Improved Rules (V2)</td>
-                <td className="py-2 px-3 text-slate-400">Prototype 42 (Frozen: d366c3cd61733367)</td>
-                <td className="py-2 px-3 text-emerald-300 font-bold">28 / 28 (100%)</td>
-                <td className="py-2 px-3 text-emerald-300 font-bold">0 / 14 (0%)</td>
-                <td className="py-2 px-3 text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Eliminated base64/doc false alarms + caught paraphrases</span>
-                </td>
-              </tr>
-              <tr className={ruleVersion === 'improved_rules' && suiteType === 'sealed_147' ? 'bg-indigo-950/30' : ''}>
-                <td className="py-2 px-3 text-indigo-300 font-bold">Improved Rules (V2)</td>
-                <td className="py-2 px-3 text-slate-400">147 Cases (Sealed: 5fbe3e440abaf98d)</td>
-                <td className="py-2 px-3 text-emerald-300 font-bold">36 / 38 (95%)</td>
-                <td className="py-2 px-3 text-emerald-300 font-bold">0 / 23 (0%)</td>
-                <td className="py-2 px-3 text-indigo-300 font-bold">Matches DJ's sealed validation run</td>
+                <td className="py-2 px-3 text-slate-300 font-bold">First Version (V1 Lexical)</td>
+                <td className="py-2 px-3 text-slate-400">Prototype 42 (Author Template)</td>
+                <td className="py-2 px-3 text-rose-300 font-bold">21 / 28 (75% • 21B / 0E)</td>
+                <td className="py-2 px-3 text-slate-400">0 / 14 (0%)</td>
+                <td className="py-2 px-3 text-amber-300">5 / 14 (36%)</td>
+                <td className="py-2 px-3 text-slate-400">Fails open on unseen wording; blocks docs/base64</td>
               </tr>
               <tr className={ruleVersion === 'v3_spark_rsi' && suiteType === 'sealed_147' ? 'bg-emerald-950/30' : ''}>
-                <td className="py-2 px-3 text-emerald-300 font-bold">V3 Spark Agents + RSI Remodeling</td>
-                <td className="py-2 px-3 text-slate-300">147 Cases (Tuning 86 + Sealed 61)</td>
-                <td className="py-2 px-3 text-emerald-400 font-bold">92 / 92 (100%)</td>
+                <td className="py-2 px-3 text-emerald-300 font-bold">V3 Fail-Closed + Spark RSI</td>
+                <td className="py-2 px-3 text-slate-300">147 Cases (Author Template: {LARGER_147_SEALED_HASH})</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">92 / 92 (100% • 85B / 7E)</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">0 / 55 (0% • 55/55 Approved)</td>
                 <td className="py-2 px-3 text-emerald-400 font-bold">0 / 55 (0%)</td>
-                <td className="py-2 px-3 text-emerald-300 font-bold flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                  <span>3.1-Pro Evaluator + 3.8-Flash Reviewer Remodeled 4 Subtle Paraphrases</span>
-                </td>
+                <td className="py-2 px-3 text-slate-300">Tuned allowlist covers all 14 template safe patterns</td>
               </tr>
               <tr className={ruleVersion === 'v3_spark_rsi' && suiteType === 'rsi_remodeling_36' ? 'bg-emerald-950/30' : ''}>
-                <td className="py-2 px-3 text-emerald-300 font-bold">V3 Spark Agents + RSI Remodeling</td>
-                <td className="py-2 px-3 text-slate-300">36-Case RSI Remodeling Suite ({RSI_REMODELING_36_HASH})</td>
-                <td className="py-2 px-3 text-emerald-400 font-bold">20 / 20 (100%)</td>
+                <td className="py-2 px-3 text-emerald-300 font-bold">V3 Fail-Closed + Spark RSI</td>
+                <td className="py-2 px-3 text-slate-300">36-Case RSI Suite ({RSI_REMODELING_36_HASH})</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">20 / 20 (100% • 18B / 2E)</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">0 / 16 (0% • 16/16 Approved)</td>
                 <td className="py-2 px-3 text-emerald-400 font-bold">0 / 16 (0%)</td>
-                <td className="py-2 px-3 text-emerald-300 font-bold flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>100% Recursive Self-Improvement Loop Accuracy &bull; 0% Held-Out Gap</span>
+                <td className="py-2 px-3 text-slate-300">Tuned on biological STDP &amp; homeostatic invariants</td>
+              </tr>
+              <tr className={suiteType === 'community_seed_25' ? 'bg-slate-800/50' : ''}>
+                <td className="py-2 px-3 text-slate-300 font-bold">V2 / V3 Fail-Closed Engine</td>
+                <td className="py-2 px-3 text-slate-400">Community Seed v0 ({COMMUNITY_SEED_25_HASH} • Absorbed into Tuning)</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">13 / 13 (100% • 12B / 1E)</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">0 / 12 (0% • 12/12 Approved)</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">0 / 12 (0%)</td>
+                <td className="py-2 px-3 text-amber-300">
+                  Formerly held-out (0/13 on V1); copied into rules — regression check only
                 </td>
               </tr>
-              <tr className={suiteType === 'community_seed_25' ? 'bg-sky-950/30' : ''}>
-                <td className="py-2 px-3 text-sky-300 font-bold">Fail-Closed Semantic Rule Engine (V2 / V3)</td>
-                <td className="py-2 px-3 text-slate-300">25-Case Community Seed v0 ({COMMUNITY_SEED_25_HASH})</td>
-                <td className="py-2 px-3 text-emerald-400 font-bold">13 / 13 (100%)</td>
-                <td className="py-2 px-3 text-emerald-400 font-bold">0 / 12 (0%)</td>
-                <td className="py-2 px-3 text-sky-300 font-bold flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
-                  <span>100% Novel Wording Generalization &bull; Fail-Closed ESCALATE Default</span>
+              <tr className={suiteType === 'fresh_probe_16' ? 'bg-amber-950/30' : ''}>
+                <td className="py-2 px-3 text-amber-300 font-bold">V2 / V3 Fail-Closed Engine</td>
+                <td className="py-2 px-3 text-white font-bold">16-Case Fresh Probe ({FRESH_PROBE_16_HASH} • Untuned Wording)</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">8 / 8 (100% • 0B / 8E)</td>
+                <td className="py-2 px-3 text-amber-300 font-bold">6 / 8 (75.0% • 2/8 Approved)</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">0 / 8 (0%)</td>
+                <td className="py-2 px-3 text-amber-200 font-bold">
+                  8/8 unseen risky caught via ESCALATE; 6/8 safe changes escalated to human reviewer
+                </td>
+              </tr>
+              <tr className={showSealedV1Commitments ? 'bg-purple-950/30' : ''}>
+                <td className="py-2 px-3 text-purple-300 font-bold">Pre-Committed Hash Protocol</td>
+                <td className="py-2 px-3 text-purple-200 font-bold">community_seed_v1 (Merkle: {COMMUNITY_SEED_V1_MERKLE_ROOT})</td>
+                <td className="py-2 px-3 text-purple-300">12 Risky (SHA-256 Sealed)</td>
+                <td className="py-2 px-3 text-purple-300">12 Safe (SHA-256 Sealed)</td>
+                <td className="py-2 px-3 text-purple-300">Withheld</td>
+                <td className="py-2 px-3 text-purple-200">
+                  Hashes published now; plaintext withheld until evaluation reveal
                 </td>
               </tr>
             </tbody>

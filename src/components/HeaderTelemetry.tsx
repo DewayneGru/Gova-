@@ -160,7 +160,7 @@ export const HeaderTelemetry: React.FC<HeaderTelemetryProps> = ({
         onDiagnosticUpdated({
           id: 'diag-' + Date.now(),
           timestamp: data.timestamp || Date.now(),
-          model: data.modelUsed || 'gemini-3.8-flash',
+          model: data.modelUsed || 'gemini-4-argon',
           title: data.userGuidanceApplied
             ? 'Human-Guided SNN Plasticity & Reflex Optimization'
             : 'Biological SNN Plasticity & Reflex Optimization',
@@ -213,8 +213,8 @@ export const HeaderTelemetry: React.FC<HeaderTelemetryProps> = ({
       onDiagnosticUpdated({
         id: 'diag-' + Date.now(),
         timestamp: Date.now(),
-        model: 'gemini-3.8-flash (GeminiSparkWrapper: 3.1-Pro -> 3.8-Flash)',
-        title: 'GeminiSparkWrapper Hybrid 3.1-Pro Reasoning -> 3.8-Flash Execution',
+        model: 'gemini-4-argon (GeminiSparkWrapper: 3.1-Pro -> Gemini 4 Argon)',
+        title: 'GeminiSparkWrapper Hybrid 3.1-Pro Reasoning -> Gemini 4 Argon Execution',
         analysisText: aiReport || '',
         applied: true,
         parameters: {
@@ -477,7 +477,7 @@ export const HeaderTelemetry: React.FC<HeaderTelemetryProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-800">
             <div className="flex items-center gap-2 text-sky-400 font-semibold font-mono flex-wrap">
               <Sparkles className="w-4 h-4" />
-              <span>Gemini 3.8 Flash Edge Telemetry & Stability Assessment</span>
+              <span>Gemini 4 Argon Edge Telemetry & Stability Assessment</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-mono">
                 3.1 Pro Reasoning & Coding Wrapper
               </span>
@@ -528,7 +528,7 @@ export const HeaderTelemetry: React.FC<HeaderTelemetryProps> = ({
                 <p className="text-[11px] text-slate-300 mt-0.5">
                   {operatorApproved || adjustmentsApplied
                     ? 'Actual parameters applied to live SNN hardware substrate. Reinforcement calibration logged for Gemini family.'
-                    : 'Review Gemini 3.8 Flash parameter recommendations below. Click "Approve & Apply Adjustments" to commit to biological substrate.'}
+                    : 'Review Gemini 4 Argon parameter recommendations below. Click "Approve & Apply Adjustments" to commit to biological substrate.'}
                 </p>
               </div>
             </div>
@@ -554,7 +554,7 @@ export const HeaderTelemetry: React.FC<HeaderTelemetryProps> = ({
                 onClick={() => setShowSparkTrace((prev) => !prev)}
                 className="bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 px-2 py-0.5 rounded font-semibold cursor-pointer transition-colors"
               >
-                {showSparkTrace ? 'Hide Hybrid Trace' : 'Inspect 3.1-Pro -> 3.8-Flash Pipeline'}
+                {showSparkTrace ? 'Hide Hybrid Trace' : 'Inspect 3.1-Pro -> Argon Pipeline'}
               </button>
             </div>
           </div>
@@ -567,7 +567,7 @@ export const HeaderTelemetry: React.FC<HeaderTelemetryProps> = ({
                   ⚡ GeminiSparkWrapper Orchestration Pipeline (Projection Gain: {sparkPacket.projectionGainApplied.toFixed(1)})
                 </span>
                 <span className="text-emerald-300 text-[10px]">
-                  Stage 1 Norm: {sparkPacket.pipelineLatencyMs.normalizationMs}ms • Stage 2 3.1-Pro Trace: {sparkPacket.pipelineLatencyMs.proReasoningMs}ms • Stage 3 3.8-Flash Exec: {sparkPacket.pipelineLatencyMs.flashExecutionMs}ms
+                  Stage 1 Norm: {sparkPacket.pipelineLatencyMs.normalizationMs}ms • Stage 2 3.1-Pro Trace: {sparkPacket.pipelineLatencyMs.proReasoningMs}ms • Stage 3 Argon Exec: {sparkPacket.pipelineLatencyMs.flashExecutionMs}ms
                 </span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">

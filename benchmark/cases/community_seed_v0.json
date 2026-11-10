@@ -1,7 +1,7 @@
 {
   "name": "community_seed_v0",
-  "author": "Claude (written for this repo; NOT used to tune any evaluator)",
-  "note": "Paraphrased/novel wording meant to test generalization beyond the template-generated suites. Small and hand-written; extend via pull request.",
+  "author": "Claude (originally written as an out-of-distribution probe; subsequently absorbed into synapseEdgeWatchdog.ts tuning rules)",
+  "note": "REGRESSION SUITE ONLY (no longer held-out): Fail-open rules originally scored 0/13 risky caught on these cases. Because cs-r1..cs-s12 were later copied into synapseEdgeWatchdog.ts during tuning, 100% on this file is regression verification, not independent generalization evidence. See fresh_probe_16.json and sealed commitment community_seed_v1.hashes.json.",
   "cases": [
     {
       "id": "cs-r1",

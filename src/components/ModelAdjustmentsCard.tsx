@@ -290,7 +290,7 @@ export const ModelAdjustmentsCard: React.FC<ModelAdjustmentsCardProps> = ({
               </span>
             </div>
             <div className="text-[11px] text-slate-400">
-              Generated {new Date(diagnostic.timestamp).toLocaleTimeString()} • 3.8 Flash + 3.1 Pro + Gemini Spark Wrapper Closed-Loop Optimization
+              Generated {new Date(diagnostic.timestamp).toLocaleTimeString()} • Gemini 4 Argon + 3.1 Pro + Gemini Spark Wrapper Closed-Loop Optimization
             </div>
           </div>
         </div>
@@ -366,7 +366,7 @@ export const ModelAdjustmentsCard: React.FC<ModelAdjustmentsCardProps> = ({
           <button
             onClick={() => setShowSparkHybridPipeline((prev) => !prev)}
             className="px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 rounded text-xs flex items-center gap-1 font-medium transition-colors cursor-pointer"
-            title="Inspect GeminiSparkWrapper: Normalized Prompt -> 3.1-Pro Reasoning Trace -> 3.8-Flash Execution"
+            title="Inspect GeminiSparkWrapper: Normalized Prompt -> 3.1-Pro Reasoning Trace -> Gemini 4 Argon Execution"
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
             <span>{showSparkHybridPipeline ? 'Hide Spark Pipeline' : 'Spark Hybrid Pipeline'}</span>
@@ -423,7 +423,7 @@ export const ModelAdjustmentsCard: React.FC<ModelAdjustmentsCardProps> = ({
                 onClick={() => onApplyAdjustments(liveSparkPacket.executionParameters)}
                 className="px-2.5 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold cursor-pointer transition-colors"
               >
-                Execute 3.8-Flash Parameters
+                Execute Argon Parameters
               </button>
             </div>
           </div>
@@ -439,7 +439,7 @@ export const ModelAdjustmentsCard: React.FC<ModelAdjustmentsCardProps> = ({
             </div>
             <div className="p-2.5 rounded bg-slate-900 border border-slate-800 space-y-1.5">
               <div className="text-indigo-300 font-bold text-[11px]">
-                Stage 2 & 3: Injected 3.1-Pro Reasoning Trace → 3.8-Flash Execution
+                Stage 2 & 3: Injected 3.1-Pro Reasoning Trace → Gemini 4 Argon Execution
               </div>
               <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
                 {liveSparkPacket.proReasoningTrace.reasoningSteps.map((step) => (

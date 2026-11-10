@@ -188,7 +188,7 @@ export class DiagnosticTrendAnalyzer {
     return seeds.map((s) => ({
       id: `diag-epoch-${s.epoch}-${s.offsetMs}`,
       timestamp: now - s.offsetMs,
-      model: 'gemini-3.8-flash',
+      model: 'gemini-4-argon',
       title: s.title,
       analysisText: s.analysisExcerpt,
       hardLockedPlankVerified: true,

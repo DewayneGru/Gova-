@@ -636,7 +636,7 @@ def load_workspace_memory() -> Dict[str, Any]:
         return {
             "projectScope": {
                 "title": "Neuromorphic Cognitive Architecture",
-                "primaryModel": "gemini-3.8-flash",
+                "primaryModel": "gemini-4-argon",
                 "thermalPowerBudgetMw": 5.0,
                 "stdpInvariants": {
                     "aPlus": 0.032,
@@ -902,7 +902,7 @@ def export_markdown_state(data: Dict[str, Any]):
 ## 1. Project Scope & Architecture
 - **App Name:** {data.get('appName', 'Neuromorphic Bridge')}
 - **Title:** {scope.get('title', 'Spiking Neural Network Edge Processor')}
-- **Primary Model Alias:** `{scope.get('primaryModel', 'gemini-3.8-flash')}`
+- **Primary Model Alias:** `{scope.get('primaryModel', 'gemini-4-argon')}`
 - **Thermal Power Ceiling:** {scope.get('thermalPowerBudgetMw', 5.0)} mW
 - **Target AER Latency:** {scope.get('aerTargetLatencyMs', 1.5)} ms
 
@@ -1032,7 +1032,7 @@ def query_gemini_bridge(
         )
 
     client = genai.Client(api_key=api_key)
-    model_name = memory.get("projectScope", {}).get("primaryModel", "gemini-3.8-flash")
+    model_name = memory.get("projectScope", {}).get("primaryModel", "gemini-4-argon")
 
     try:
         response = client.models.generateContent(

@@ -635,7 +635,7 @@ export const ArgonRoboticsStudio: React.FC<Props> = ({ engine }) => {
                 <h3 className="text-sm font-bold text-white">Gemini Argon Cognitive Planner</h3>
               </div>
               <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-indigo-500/20 border border-indigo-500/30 text-indigo-300">
-                gemini-3.8-flash
+                gemini-4-argon
               </span>
             </div>
 

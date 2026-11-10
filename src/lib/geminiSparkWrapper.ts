@@ -360,14 +360,14 @@ PILLAR 5: SYNAPTIC STABILITY & DIVERGENCE RISK INDEX (DRI)
       },
     ];
 
-    const injectedTracePromptBlock = `[GEMINI 3.1-PRO REASONING TRACE — STABILITY & PLANK EVALUATION]
+    const injectedTracePromptBlock = `[SPARK (3.1-PRO) & 3.8-FLASH BENCHMARK EVALUATION TRACE — STABILITY & PLANK VERIFICATION FOR GEMINI 4 ARGON]
 - Trace ID: ${`pro31_trace_${Date.now()}`}
 - Stability Verdict: ${hardLockedPlankViolated ? 'PLANK_VIOLATION_CORRECTABLE' : 'NOMINAL'}
 - Step 1 (Edge Efficiency & Register Isolation): ${reasoningSteps[0].deduction}
 - Step 2 (STDP Plank & Nonlinear Invariants): ${reasoningSteps[1].deduction}
 - Step 3 (Keel & DC Hyperpolarizing Shunt): ${reasoningSteps[2].deduction}
 - Step 4 (Spectral Coupling & Criticality Target): ${reasoningSteps[3].deduction}
-- 3.1-Pro Pre-Validated Execution Targets for 3.8-Flash:
+- Spark (3.1-Pro) & 3.8-Flash Pre-Validated Execution Targets for Primary Gemini 4 Argon (models/gemini-4-argon):
   * STDP A+: ${curAPlus.toFixed(3)} -> ${recAPlus.toFixed(3)} (Bounded [0.018, 0.048])
   * STDP A-: ${curAMinus.toFixed(3)} -> ${recAMinus.toFixed(3)} (Ratio A-/A+ = ${targetRatio} >= 1.25)
   * Learning Rate (η): ${curLR.toFixed(2)} -> ${recLR.toFixed(2)} (Hard-Locked Plank <= 0.55)

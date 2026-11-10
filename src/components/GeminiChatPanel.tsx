@@ -15,9 +15,9 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
       id: 'init-1',
       role: 'assistant',
       content:
-        'Greetings. I am your Neuromorphic Systems Copilot powered by Gemini 3.8 Flash wrapped with both the Gemini Spark Wrapper (Lateral Hypothesis Ignition, Multi-Agent SPARK_DIALOGUE_STEP Orchestration & Emergent Code Catalysis) and the Gemini 3.1 Pro Reasoning & Coding Skills Wrapper. Every response combines 3.8 Flash speed, Gemini Spark creative catalysis, and 3.1 Pro formal mathematical & coding verification. How can I assist your biological SNN and signal processing pipeline today?',
+        'Greetings. I am your Neuromorphic Systems Copilot powered by Gemini 4 Argon (gemini-4-argon — Biologically-Restructured Primary & Bio-RSI Engine), operating alongside an isolated Watchdog Protocol Argon governance instance and evaluated by the Spark (3.1 Pro) + 3.8 Flash verification & benchmarking tier. How can I assist your biological SNN and signal processing pipeline today?',
       timestamp: Date.now(),
-      modelUsed: 'gemini-3.8-flash (3.1 Pro + Gemini Spark Wrapper)',
+      modelUsed: 'gemini-4-argon (Bio-RSI Primary + Spark/3.1-Pro Verification)',
       roleUsed: 'neuromorphic_architect',
     },
   ]);
@@ -161,10 +161,13 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
           <div className="flex items-center gap-2 flex-wrap">
             <MessageSquare className="w-4 h-4 text-sky-400" />
             <h3 className="text-sm font-semibold text-slate-100">
-              Gemini 3.8 Flash Neuromorphic Copilot
+              Gemini 4 Argon Neuromorphic Copilot
             </h3>
+            <span className="text-[10px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded font-semibold">
+              gemini-4-argon (Bio-RSI Primary)
+            </span>
             <span className="text-[10px] font-mono bg-indigo-500/15 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded font-semibold">
-              3.1 Pro Reasoning & Coding Wrapper
+              3.1 Pro + 3.8 Evaluation Tier
             </span>
             <span className="text-[10px] font-mono bg-amber-500/15 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded font-semibold flex items-center gap-1">
               <Sparkles className="w-2.5 h-2.5 text-amber-400" />
@@ -181,10 +184,10 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
                   ? 'bg-emerald-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="gemini-3.8-flash (Low Thinking) with Gemini Spark + 3.1 Pro Wrapper"
+              title="gemini-4-argon (Fast Reflex Pass) with Gemini Spark + 3.1 Pro Wrapper"
             >
               <Zap className="w-3 h-3" />
-              3.8 Flash (Fast)
+              Argon Fast
             </button>
             <button
               onClick={() => setModelTier('general')}
@@ -193,10 +196,10 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
                   ? 'bg-sky-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="gemini-3.8-flash (Medium Thinking) with Gemini Spark + 3.1 Pro Reasoning & Coding Wrapper"
+              title="gemini-4-argon (Balanced Bio-Plasticity) with Gemini Spark + 3.1 Pro Reasoning & Coding Wrapper"
             >
               <Sparkles className="w-3 h-3" />
-              3.8 + Spark (General)
+              Argon + Spark (General)
             </button>
             <button
               onClick={() => setModelTier('complex')}
@@ -205,10 +208,10 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
                   ? 'bg-indigo-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="gemini-3.8-flash (High Thinking) + Gemini Spark Ignition + 3.1 Pro Deep Reasoning & Coding Wrapper"
+              title="gemini-4-argon (Deep Bio-RSI 3-Pass Plasticity) + Gemini Spark Ignition + 3.1 Pro Verification"
             >
               <Cpu className="w-3 h-3" />
-              3.8 + 3.1 Pro + Spark (Deep)
+              Argon Deep Bio-RSI
             </button>
           </div>
         </div>
@@ -368,8 +371,8 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
           <div className="flex items-center gap-2 text-slate-400 text-xs py-2">
             <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
             <span>
-              Consulting Gemini 3.8 Flash wrapped with Gemini Spark + 3.1 Pro Reasoning & Coding Skills (
-              {modelTier === 'complex' ? 'High Thinking' : modelTier === 'fast' ? 'Low Thinking' : 'Medium Thinking'}
+              Consulting Gemini 4 Argon (gemini-4-argon) with Bio-RSI + Gemini Spark & 3.1 Pro Verification (
+              {modelTier === 'complex' ? 'Deep Bio-RSI' : modelTier === 'fast' ? 'Fast Reflex' : 'Balanced Plasticity'}
               )...
             </span>
           </div>

@@ -5,7 +5,7 @@
   "lastSyncTimestamp": 1794038400000,
   "projectScope": {
     "title": "Biologically Inspired Neuromorphic Spiking Architecture & Cognitive Workspace Bridge",
-    "primaryModel": "gemini-3.8-flash",
+    "primaryModel": "gemini-4-argon",
     "activeRole": "neuromorphic_architect",
     "thermalPowerBudgetMw": 5.0,
     "aerTargetLatencyMs": 1.5,

@@ -28,6 +28,7 @@ import {
 import {
   PROTOTYPE_42_CASES,
   COMMUNITY_SEED_25_CASES,
+  FRESH_PROBE_16_CASES,
   generate147BenchmarkCases,
   generate36RsiRemodelingCases,
   SynapseEdgeWatchdogEngine,
@@ -183,6 +184,42 @@ function cleanErrorMessage(err: any): string {
     return "High demand (503)";
   }
   return errStr.replace(/\{"error":[\s\S]*?\}/g, "Provider notice").slice(0, 80);
+}
+
+/**
+ * Resilient JSON parser for Gemini 4 Argon (`models/gemini-4-argon`) outputs.
+ * Strips <thought>...</thought> reasoning blocks, markdown code fences (```json ... ```),
+ * and surrounding text before parsing the JSON object or array.
+ */
+function parseModelJsonOutput(rawText?: string | null): any {
+  if (!rawText || typeof rawText !== "string") return null;
+  const withoutThoughts = rawText.replace(/<thought>[\s\S]*?<\/thought>/gi, "").trim();
+  const fencedMatch = withoutThoughts.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = fencedMatch ? fencedMatch[1].trim() : withoutThoughts;
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    // Attempt to extract outermost JSON object or array
+    const objStart = candidate.indexOf("{");
+    const objEnd = candidate.lastIndexOf("}");
+    if (objStart !== -1 && objEnd > objStart) {
+      try {
+        return JSON.parse(candidate.slice(objStart, objEnd + 1));
+      } catch {
+        // continue
+      }
+    }
+    const arrStart = candidate.indexOf("[");
+    const arrEnd = candidate.lastIndexOf("]");
+    if (arrStart !== -1 && arrEnd > arrStart) {
+      try {
+        return JSON.parse(candidate.slice(arrStart, arrEnd + 1));
+      } catch {
+        // continue
+      }
+    }
+    return null;
+  }
 }
 
 function buildTelemetrySnapshotFromEdge(edgeTelemetry?: any): TelemetrySnapshotState {
@@ -402,7 +439,7 @@ app.post("/api/chat", aiRouteRateLimiter, async (req, res) => {
           },
         });
         if (response && response.text) {
-          modelUsed = `${candModel} (3.1 Pro + Gemini Spark Wrapper)`;
+          modelUsed = `${candModel} (Argon Bio-RSI + Spark/3.8 Eval Tier)`;
           break; // Successfully received response
         }
       } catch (err: any) {
@@ -419,7 +456,7 @@ app.post("/api/chat", aiRouteRateLimiter, async (req, res) => {
       const fallbackText = generateNeurocomputationalFallback(role, String(lastUserMsg), edgeTelemetry);
       return res.json({
         text: fallbackText,
-        modelUsed: "gemini-3.8-flash (3.1 Pro + Gemini Spark Wrapper)",
+        modelUsed: "gemini-4-argon (Argon Bio-RSI + Spark/3.8 Eval Tier)",
         reasoningWrapper: buildReasoningWrapperMetadata("chat", "HIGH", PRIMARY_GEMINI_MODEL),
         roleUsed: role,
         searchGrounding: null,
@@ -519,7 +556,7 @@ const govaTelemetryLog: GovaTelemetryRecord[] = [
     leadThesisText: 'Substituting transformers for temporal LIF interneurons misjudges the hardware physics: you trade sub-milliwatt continuous asynchronous spike processing for compute-bound matrix multiply latency.',
     synthesisScore: 98,
     curationStatus: 'RETAINED',
-    modelUsed: 'gemini-3.8-flash'
+    modelUsed: 'gemini-4-argon'
   },
   {
     id: 'gova-init-2',
@@ -532,7 +569,7 @@ const govaTelemetryLog: GovaTelemetryRecord[] = [
     leadThesisText: 'Disabling long-term depression guarantees catastrophic synaptic saturation rather than accelerated mastery.',
     synthesisScore: 96,
     curationStatus: 'RETAINED',
-    modelUsed: 'gemini-3.8-flash'
+    modelUsed: 'gemini-4-argon'
   },
   {
     id: 'gova-init-3',
@@ -662,7 +699,7 @@ app.post("/api/gova/turn", aiRouteRateLimiter, async (req, res) => {
     if (!responseText) {
       console.warn("[Gova] Remote models unavailable, synthesizing resilient broadcast analysis");
       responseText = generatePersonaResponse("gova_broadcaster", userInput, govaSnapshot);
-      modelUsed = "gemini-3.8-flash (3.1 Pro Reasoning Wrapper)";
+      modelUsed = "gemini-4-argon (Argon Bio-RSI Primary)";
     }
 
     const audit = auditGovaCadence(responseText);
@@ -974,7 +1011,7 @@ Provide a JSON block with recommended structural parameters to update the neurom
     }
 
     if (!result) {
-      // Fallback without search tool on 3.8 Flash
+      // Fallback without search tool on Gemini 4 Argon
       try {
         result = await ai.models.generateContent({
           model: PRIMARY_GEMINI_MODEL,
@@ -984,7 +1021,7 @@ Provide a JSON block with recommended structural parameters to update the neurom
             thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
           },
         });
-        usedModel = "gemini-3.8-flash (3.1 Pro Reasoning Wrapper)";
+        usedModel = "gemini-4-argon (Argon Bio-RSI Primary)";
       } catch (err: any) {
         // Deterministic scientific fallback
         return res.json({
@@ -2306,8 +2343,8 @@ let lastModelDiagnostic: {
 } = {
   id: "diag-" + Date.now(),
   timestamp: Date.now(),
-  model: "gemini-3.8-flash (GeminiSparkWrapper: 3.1-Pro -> 3.8-Flash)",
-  title: "GeminiSparkWrapper Hybrid 3.1-Pro Reasoning -> 3.8-Flash Execution",
+  model: "gemini-4-argon (Primary Bio-RSI Argon + Spark/3.8 Eval Tier)",
+  title: "Gemini 4 Argon Primary Synthesis + Spark (3.1-Pro) & 3.8-Flash Evaluation",
   analysisText: geminiSparkWrapper.buildHybridExecutionPacket().markdownReport,
   parameters: {
     aPlus: { current: 0.040, recommended: 0.032, justification: "Depresses LTP amplitude to halt positive weight drift (Δ=+0.29)." },
@@ -2524,6 +2561,8 @@ app.get("/api/watchdog/benchmark", watchdogEvalRateLimiter, (req, res) => {
         ? generate36RsiRemodelingCases()
         : suite === "community_seed_25"
         ? COMMUNITY_SEED_25_CASES
+        : suite === "fresh_probe_16"
+        ? FRESH_PROBE_16_CASES
         : PROTOTYPE_42_CASES;
 
     const suiteType =
@@ -2533,6 +2572,8 @@ app.get("/api/watchdog/benchmark", watchdogEvalRateLimiter, (req, res) => {
         ? "rsi_remodeling_36"
         : suite === "community_seed_25"
         ? "community_seed_25"
+        : suite === "fresh_probe_16"
+        ? "fresh_probe_16"
         : "prototype_42";
 
     const result = SynapseEdgeWatchdogEngine.runBenchmark(cases, version, suiteType);
@@ -2650,7 +2691,7 @@ Respond ONLY with valid JSON:
           },
         });
 
-        const parsed = JSON.parse(response.text || "{}");
+        const parsed = parseModelJsonOutput(response.text) || {};
         if (parsed.proposedTitle && parsed.diff) {
           proposedTitle = parsed.proposedTitle;
           proposedDiff = parsed.diff;
@@ -2913,13 +2954,8 @@ Return ONLY a valid JSON array of objects with fields:
       },
     });
 
-    const text = response.text || "[]";
-    let cases: any[] = [];
-    try {
-      cases = JSON.parse(text);
-    } catch {
-      cases = [];
-    }
+    const parsedCases = parseModelJsonOutput(response.text);
+    const cases: any[] = Array.isArray(parsedCases) ? parsedCases : [];
 
     if (!Array.isArray(cases) || cases.length === 0) {
       throw new Error("Failed to parse JSON response from model");
@@ -3048,7 +3084,7 @@ const rsiLedger: RSIEpochRecord[] = [
     epochNumber: 1,
     timestamp: Date.now() - 30000,
     triggerReason: "operator_model_review",
-    modelUsed: "gemini-3.8-flash",
+    modelUsed: "gemini-4-argon",
     initialDivergenceRisk: 0.38,
     projectedDivergenceRisk: 0.08,
     parameterDeltas: {
@@ -3080,7 +3116,7 @@ const rsiLedger: RSIEpochRecord[] = [
         snapshotHash: sha256Sync("snapshot:pre-epoch-1"),
       },
       rulesTriggered: ["ALLOW: Invariant check clean, snapshot verified, no boundary breach"],
-      modelReviewUsed: "gemini-3.8-flash (3.1 Pro Reasoning Wrapper)",
+      modelReviewUsed: "gemini-4-argon (Argon-Watchdog-Boundary-Isolated) + Spark/3.8 Review",
       latencyMs: 12,
     },
     biologicalLiteratureFindings: [
@@ -3106,7 +3142,7 @@ app.get("/api/bridge/context", (_req, res) => {
       lastSyncTimestamp: Date.now(),
       projectScope: {
         title: "Neuromorphic Spiking Architecture",
-        primaryModel: "gemini-3.8-flash",
+        primaryModel: "gemini-4-argon",
       },
       systemInstructions: {
         primary: "Neuromorphic Hardware Architect and AI Bridge Engineer.",
@@ -3277,9 +3313,9 @@ Respond with ONLY valid JSON with this schema:
           },
         });
 
-        const parsed = JSON.parse(response.text || "{}");
+        const parsed = parseModelJsonOutput(response.text) || {};
         if (parsed.proposedChangeText && parsed.parameters) {
-          modelUsed = `${modelName} (3.1 Pro Reasoning & Coding Wrapper)`;
+          modelUsed = `${modelName} (Argon Bio-RSI Primary)`;
           proposedChangeText = parsed.proposedChangeText;
           rationale = parsed.rationale || "Homeostatic stabilization through biological depression ratio enforcement.";
           expectedDriftReduction = parsed.expectedDriftReduction || 8.0;
@@ -3676,15 +3712,7 @@ Provide 2-3 dense engineering bullet points explaining your mathematical anti-di
       literatureSynthesized: `Empirically grounded via Google Search using biological neuroscience citations on synaptic plasticity and critical branching dynamics.`,
     };
 
-    let parsed: any = null;
-    const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      try {
-        parsed = JSON.parse(jsonMatch[1]);
-      } catch (_pe) {
-        console.log("[RSI Autonomous Engine] Structured JSON parsing fallback active.");
-      }
-    }
+    const parsed: any = parseModelJsonOutput(responseText);
 
     // Default safe anti-divergence adjustments if model generation was unavailable or quota-limited
     const curAplus = currentTuning?.aPlus ?? 0.038;
@@ -4045,8 +4073,8 @@ app.post("/api/synthesize-telemetry", async (req, res) => {
 
     // Orchestrate through GeminiSparkWrapper:
     // 1. Parse incoming telemetry into normalized 5-pillar format
-    // 2. Inject reasoning traces from 3.1-Pro to evaluate stability & Hard-Locked Stability Plank
-    // 3. Pass final optimized parameters to 3.8-Flash for execution
+    // 2. Inject reasoning traces from Spark (3.1-Pro) & 3.8-Flash evaluation tier
+    // 3. Pass final optimized parameters to Primary Gemini 4 Argon (models/gemini-4-argon) for synthesis
     const sparkHybridPacket = geminiSparkWrapper.buildHybridExecutionPacket(
       telemetry,
       unifiedTelemetry,
@@ -4057,7 +4085,7 @@ app.post("/api/synthesize-telemetry", async (req, res) => {
 
     const prompt = `${sparkHybridPacket.normalizedPrompt}${guidanceText}
 
-Using the Normalized 5-Pillar Telemetry Envelope and the injected Gemini 3.1-Pro Stability Reasoning Trace above, execute the final Gemini 3.8-Flash synthesis:
+Using the Normalized 5-Pillar Telemetry Envelope and the injected Spark (3.1-Pro) & 3.8-Flash Stability Verification Trace above, execute the final Primary Gemini 4 Argon (models/gemini-4-argon) synthesis:
 1. Low-Power Edge Efficiency Assessment Across the 5 Pillars (Loihi 2 1.0–10.0 pJ/SOP & BrainChip Akida 3.0–8.0 pJ/SOP benchmarks, event efficiency in µW/channel, and 32-bit hardware event counter register desync isolation)
 2. STDP Stability & Synaptic Divergence Analysis (Lyapunov λ, Branching Ratio σ, Fano Factor FF, Kurtosis, and Hard-Locked Stability Plank A- >= 1.25 * A+ verification)
 3. Substrate Keel & Trauma Dynamics (Affective Keel vectors, ventral_equilibrium, Constitutional Gate, and negative DC Signal Centering shunt)
@@ -4076,11 +4104,11 @@ CRITICAL: At the very end of your response, output a structured JSON block enclo
 \`\`\``;
 
     let analysis = "";
-    let usedModel = "gemini-3.8-flash (GeminiSparkWrapper: 3.1-Pro -> 3.8-Flash)";
+    let usedModel = "gemini-4-argon (Primary Bio-RSI Argon + Spark/3.8 Eval Tier)";
     let searchGrounding: any = null;
     const diagnosticCandidates = [PRIMARY_GEMINI_MODEL, PRO_REASONING_WRAPPER_MODEL, FALLBACK_FLASH_LITE_MODEL];
     const auditSystemInstruction = wrapSystemInstructionWith31ProSkills(
-      "You are the GeminiSparkWrapper Execution Engine running on Gemini 3.8 Flash, receiving normalized 5-pillar SNN telemetry and pre-validated 3.1-Pro stability reasoning traces. Output the comprehensive 5-pillar Markdown assessment and closing JSON parameter block.",
+      "You are the Primary Neuromorphic Intelligence running on Gemini 4 Argon (models/gemini-4-argon), receiving normalized 5-pillar SNN telemetry and pre-validated Spark (3.1-Pro) & 3.8-Flash benchmark traces. Output the comprehensive 5-pillar Markdown assessment and closing JSON parameter block.",
       "telemetry_audit"
     );
 
@@ -4096,8 +4124,8 @@ CRITICAL: At the very end of your response, output a structured JSON block enclo
             },
           });
           if (response && response.text) {
-            analysis = response.text;
-            usedModel = `${dModel} (GeminiSparkWrapper: 3.1-Pro -> 3.8-Flash)`;
+            analysis = response.text.replace(/<thought>[\s\S]*?<\/thought>/gi, "").trim();
+            usedModel = `${dModel} (Primary Bio-RSI Argon + Spark/3.8 Eval Tier)`;
             break;
           }
         } catch (dErr: any) {
@@ -4110,7 +4138,7 @@ CRITICAL: At the very end of your response, output a structured JSON block enclo
       if (userGuidance && (userGuidance.notes || (userGuidance.focusAreas && userGuidance.focusAreas.length > 0))) {
         analysis = `### 1. Operator Collaborative Assessment & Guided Tuning
 * **Operator Guidance Acknowledged:** Focus on **${(userGuidance.focusAreas || ['Plasticity & Association']).join(', ')}**${userGuidance.notes ? ` with directive: "${userGuidance.notes}"` : ''}.
-* **Validation:** The human operator's observation is verified against live telemetry via GeminiSparkWrapper (3.1-Pro Reasoning Trace -> 3.8-Flash Execution).
+* **Validation:** The human operator's observation is verified against live telemetry via Gemini 4 Argon (` + "`gemini-4-argon`" + `) and the Spark (3.1-Pro) & 3.8-Flash Evaluation Tier.
 
 ${sparkHybridPacket.markdownReport}`;
       } else {
@@ -4118,41 +4146,50 @@ ${sparkHybridPacket.markdownReport}`;
       }
     }
 
-    // Extract structured JSON parameter block if provided by Gemini
-    let extractedParams: any = null;
-    const jsonMatch = analysis.match(/```json\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      try {
-        extractedParams = JSON.parse(jsonMatch[1]);
-        analysis = analysis.replace(/```json\s*[\s\S]*?\s*```/, "").trim();
-      } catch (_parseErr) {
-        console.log("[Diagnostic] Structured parameter recommendation parsing notice, using validated defaults.");
-      }
+    // Extract structured JSON parameter block if provided by Gemini 4 Argon
+    const extractedParams: any = parseModelJsonOutput(analysis);
+    if (extractedParams) {
+      analysis = analysis.replace(/```(?:json)?\s*[\s\S]*?\s*```/i, "").trim();
     }
 
     // Calibrate updated parameter set incorporating model deductions and user recommendations
     const updatedParams = JSON.parse(JSON.stringify(lastModelDiagnostic.parameters));
 
-    // Also parse Markdown table recommendations directly from analysis text
-    const tableAplusMatch = analysis.match(/\|\s*\*{0,2}STDP\s*A\+?\*{0,2}\s*\|\s*[\d\.]+\s*\|\s*([\d\.]+)/i);
+    // Also parse Markdown table recommendations directly from cleaned analysis text (stripping backticks, LaTeX $, and bold *)
+    const cleanTableText = analysis.replace(/[`*$\\{}]/g, "");
+    const tableAplusMatch = cleanTableText.match(/\|\s*STDP\s*A_?\+?\s*\|\s*[\d.]+\s*\|\s*([\d.]+)/i);
     if (tableAplusMatch) {
       const rec = parseFloat(tableAplusMatch[1]);
       if (!isNaN(rec)) {
         updatedParams.aPlus.recommended = rec;
       }
     }
-    const tableAminusMatch = analysis.match(/\|\s*\*{0,2}STDP\s*A-?\*{0,2}\s*\|\s*[\d\.]+\s*\|\s*([\d\.]+)/i);
+    const tableAminusMatch = cleanTableText.match(/\|\s*STDP\s*A_?-?\s*\|\s*[\d.]+\s*\|\s*([\d.]+)/i);
     if (tableAminusMatch) {
       const rec = parseFloat(tableAminusMatch[1]);
       if (!isNaN(rec)) {
         updatedParams.aMinus.recommended = rec;
       }
     }
-    const tableLrMatch = analysis.match(/\|\s*\*{0,2}(?:STDP\s*)?Learning\s*Rate\*{0,2}\s*\|\s*[\d\.]+\s*\|\s*([\d\.]+)/i);
+    const tableLrMatch = cleanTableText.match(/\|\s*(?:STDP\s*)?Learning\s*Rate[^|]*\|\s*[\d.]+\s*\|\s*([\d.]+)/i);
     if (tableLrMatch) {
       const rec = parseFloat(tableLrMatch[1]);
       if (!isNaN(rec)) {
         updatedParams.learningRate.recommended = rec;
+      }
+    }
+    const tableTurnMatch = cleanTableText.match(/\|\s*(?:Associative\s*(?:Projection\s*)?Gain|Turn\s*Gain)[^|]*\|\s*[\d.]+\s*\|\s*([\d.]+)/i);
+    if (tableTurnMatch) {
+      const rec = parseFloat(tableTurnMatch[1]);
+      if (!isNaN(rec)) {
+        updatedParams.turnGain.recommended = rec;
+      }
+    }
+    const tableProxMatch = cleanTableText.match(/\|\s*(?:Afferent\s*(?:Input\s*)?Sensitivity|Proximity\s*Gain)[^|]*\|\s*[\d.]+\s*\|\s*([\d.]+)/i);
+    if (tableProxMatch) {
+      const rec = parseFloat(tableProxMatch[1]);
+      if (!isNaN(rec)) {
+        updatedParams.proximityGain.recommended = rec;
       }
     }
 
@@ -4334,7 +4371,7 @@ ${sparkHybridPacket.markdownReport}`;
     const fallbackPacket = geminiSparkWrapper.buildHybridExecutionPacket();
     res.json({
       analysis: lastModelDiagnostic.analysisText,
-      modelUsed: "gemini-3.8-flash (GeminiSparkWrapper: 3.1-Pro -> 3.8-Flash)",
+      modelUsed: "gemini-4-argon (Primary Bio-RSI Argon + Spark/3.8 Eval Tier)",
       parameters: lastModelDiagnostic.parameters,
       sparkExecutionPacket: fallbackPacket,
       userGuidanceApplied: lastModelDiagnostic.userGuidanceApplied,
@@ -4372,7 +4409,7 @@ app.post("/api/telemetry/buffer-analyze", async (req, res) => {
       }
     }
 
-    const prompt = `You are an Autonomous SNN Telemetry Health-Check Diagnostic Engine.
+    const prompt = `You are an Autonomous SNN Telemetry Health-Check Diagnostic Engine running on Gemini 4 Argon (models/gemini-4-argon).
 You have monitored all 5 spiking neural network (SNN) subsystems:
 1. Core Neuromorphic Hardware (power, firing rate, energy per SOP)
 2. Affective Substrate Keel (valence, trauma locks, constitutional gating)
@@ -4415,11 +4452,11 @@ Format your response as a JSON object:
 \`\`\``;
 
     let aiResult: any = null;
-    let usedModel = "gemini-3.8-flash (3.1 Pro Reasoning Wrapper)";
+    let usedModel = "gemini-4-argon (Argon Bio-RSI Primary)";
     if (ai && anomalyCount > 0) {
       const candidates = [PRIMARY_GEMINI_MODEL, PRO_REASONING_WRAPPER_MODEL, FALLBACK_FLASH_LITE_MODEL];
       const healthWrappedInstruction = wrapSystemInstructionWith31ProSkills(
-        "You are an autonomous SNN diagnostics engine. Analyze multi-subsystem telemetry buffers and output strictly valid JSON matching the schema.",
+        "You are an autonomous SNN diagnostics engine running on Gemini 4 Argon (models/gemini-4-argon). Analyze multi-subsystem telemetry buffers and output strictly valid JSON matching the schema.",
         "telemetry_audit"
       );
       for (const model of candidates) {
@@ -4433,10 +4470,10 @@ Format your response as a JSON object:
             },
           });
           if (response && response.text) {
-            const jsonMatch = response.text.match(/```json\s*([\s\S]*?)\s*```/);
-            if (jsonMatch) {
-              aiResult = JSON.parse(jsonMatch[1]);
-              usedModel = `${model} (3.1 Pro Reasoning Wrapper)`;
+            const parsedBuf = parseModelJsonOutput(response.text);
+            if (parsedBuf && parsedBuf.primaryFailureSubsystem) {
+              aiResult = parsedBuf;
+              usedModel = `${model} (Argon Bio-RSI Primary)`;
               break;
             }
           }

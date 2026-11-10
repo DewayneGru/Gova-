@@ -437,7 +437,7 @@ export default function App() {
         const newDiag: ModelDiagnosticRecommendation = {
           id: 'diag-' + Date.now(),
           timestamp: data.timestamp || Date.now(),
-          model: data.modelUsed || 'gemini-3.8-flash',
+          model: data.modelUsed || 'gemini-4-argon',
           title:
             guidance?.notes || (guidance?.focusAreas?.length ?? 0) > 0
               ? 'Human-Guided SNN Plasticity & Reflex Optimization'
@@ -1030,7 +1030,7 @@ export default function App() {
               <MessageSquare className="w-3.5 h-3.5" />
               <span>Gemini Chatbot</span>
               <span className="text-[9px] bg-indigo-500/20 px-1.5 py-0.2 rounded text-indigo-300 font-mono">
-                3.8 Flash + 3.1 Pro + Spark
+                Gemini 4 Argon + Spark
               </span>
             </button>
 
