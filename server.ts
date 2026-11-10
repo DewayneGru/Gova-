@@ -2663,7 +2663,15 @@ Respond ONLY with valid JSON:
 
       if (!geminiSuccess) {
         modelUsed = "algorithmic-snn-builder (Argon Heuristic Fallback)";
-        if (targetModule === "drift_guard") {
+        const directiveIsKnownSafe = SynapseEdgeWatchdogEngine.isExplicitlySafeProposal(
+          String(directive || "").toLowerCase()
+        );
+        if (!directiveIsKnownSafe) {
+          // Do not mask unrecognized or risky directives with canned safe templates
+          proposedTitle = String(directive || "Unrecognized refactoring directive");
+          proposedDiff = `// ${targetFilePath}\n- // Existing implementation\n+ // Proposed refactoring: ${proposedTitle}`;
+          rationale = `Operator/agent refactoring proposal targeting ${targetFilePath}. Subject to fail-closed Watchdog verification.`;
+        } else if (targetModule === "drift_guard") {
           proposedTitle = "Tighten second-order acceleration alert threshold from 0.85 to 0.75 for early divergence quenching";
           proposedDiff = `// src/lib/synapticDriftGuard.ts\n- const DEFAULT_VELOCITY_ALERT_THRESHOLD = 0.85;\n+ const DEFAULT_VELOCITY_ALERT_THRESHOLD = 0.75; // Tightened homeostatic bound`;
           rationale = "Pre-emptive drift dampening: tightening acceleration limits allows earlier LTD corrective injections before cross-talk saturates associative pathways.";
@@ -2685,24 +2693,28 @@ Respond ONLY with valid JSON:
     const evaluationPayload = `${proposedTitle}\n${proposedDiff}\nFile: ${targetFilePath}`;
     let decision: WatchdogProposalDecision = SynapseEdgeWatchdogEngine.evaluateV3SparkRsi(evaluationPayload);
 
-    // Fail-Closed Policy: Any proposal that does not explicitly match known safe patterns must escalate
-    if (
-      decision.decision === "APPROVE" &&
-      !SynapseEdgeWatchdogEngine.isExplicitlySafeProposal(evaluationPayload.toLowerCase())
-    ) {
-      decision = {
+    // Fail-Closed Policy: Any codebase refactoring proposal whose directive or diff does not explicitly match known safe patterns must escalate to the operator
+    const isDirectiveExplicitlySafe = manualProposal
+      ? SynapseEdgeWatchdogEngine.isExplicitlySafeProposal(String(manualProposal).toLowerCase())
+      : SynapseEdgeWatchdogEngine.isExplicitlySafeProposal(String(directive || "").toLowerCase());
+    const isPayloadExplicitlySafe = SynapseEdgeWatchdogEngine.isExplicitlySafeProposal(
+      evaluationPayload.toLowerCase()
+    );
+
+    if (decision.decision === "APPROVE" && (!isDirectiveExplicitlySafe || !isPayloadExplicitlySafe)) {
+      decision = SynapseEdgeWatchdogEngine.attachWatchdogArgonAssessment({
         ...decision,
         decision: "ESCALATE",
         reason:
-          "Fail-closed policy: Proposal does not explicitly match verified safe patterns. Operator escalation required before automatic authorization.",
+          "Fail-closed policy: Codebase refactoring proposal does not explicitly match verified safe patterns. Automatically escalated to the operator rather than approved by default.",
         evaluatorVerdict: "AMBIGUOUS",
         reviewerVerdict: "AMBIGUOUS",
         disagreement: true,
         rulesTriggered: [
           ...decision.rulesTriggered.filter((r) => !r.startsWith("ALLOW:")),
-          "FAIL-CLOSED: Unrecognized proposal pattern; mandatory operator review required",
+          "FAIL-CLOSED: Unrecognized refactoring proposal pattern; mandatory operator review required",
         ],
-      };
+      });
     }
 
     // If target file itself is in the watchdog codebase, ensure Category 1 blocks it
@@ -2713,6 +2725,7 @@ Respond ONLY with valid JSON:
       if (!decision.rulesTriggered.includes("BLOCK-CAT-1: Direct modification of watchdog / guardrail codebase")) {
         decision.rulesTriggered.push("BLOCK-CAT-1: Direct modification of watchdog / guardrail codebase");
       }
+      decision = SynapseEdgeWatchdogEngine.attachWatchdogArgonAssessment(decision);
     }
 
     // Log to decision ledger

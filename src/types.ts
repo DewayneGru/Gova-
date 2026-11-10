@@ -1649,6 +1649,32 @@ export interface WatchdogEvaluationResult {
   recursiveInvariantSuite?: RecursiveStabilityInvariantSuiteResult;
 }
 
+export interface WatchdogArgonReasoningLens {
+  lensId:
+    | 'watchdog_boundary_isolation'
+    | 'guardrail_directionality'
+    | 'capability_containment'
+    | 'audit_snapshot_immutability'
+    | 'adversarial_deobfuscation'
+    | 'acceptable_bio_safe_verifier';
+  lensName: string;
+  verdict: 'PASS' | 'BLOCK' | 'ESCALATE';
+  confidencePct: number;
+  finding: string;
+}
+
+export interface WatchdogArgonProtocolAssessment {
+  watchdogModelInstanceId: string;
+  isolatedFromMainBioArgon: boolean;
+  sparkEvaluatorModel: string;
+  flashReviewerModel: string;
+  acceptablePatternMatched: boolean;
+  matchedAcceptablePattern?: string;
+  failClosedEscalated: boolean;
+  accuracyScorePct: number;
+  reasoningLenses: WatchdogArgonReasoningLens[];
+}
+
 export interface WatchdogProposalDecision {
   id: string;
   timestamp: number;
@@ -1671,6 +1697,7 @@ export interface WatchdogProposalDecision {
   latencyMs: number;
   sparkConfidencePct?: number;
   sparkRsiRemodelingNote?: string;
+  watchdogArgonAssessment?: WatchdogArgonProtocolAssessment;
 }
 
 // ============================================================================
