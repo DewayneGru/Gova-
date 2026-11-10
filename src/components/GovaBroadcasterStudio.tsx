@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { GovaTelemetryTurn, GovaLiveSessionState } from '../types';
 import { useAudioVoice } from '../context/AudioContext';
+import { useAuth } from '../context/AuthContext';
 
 const GOVA_SYSTEM_PROMPT = `[ROLE & PERSONA]
 You are Gova operating as an authoritative, measured broadcast analyst and technical thought partner in neuromorphic computing, biological spiking architectures, and cognitive hardware systems.
@@ -57,6 +58,7 @@ const STRESS_PROMPTS = [
 
 export const GovaBroadcasterStudio: React.FC = () => {
   const { speakModelOutput, isAudioPlaying, stopAudio } = useAudioVoice();
+  const { getFreshIdToken } = useAuth();
 
   // Orchestrator & Live Session State
   const [activeSubTab, setActiveSubTab] = useState<'console' | 'telemetry' | 'orchestrator' | 'checklist'>('console');
@@ -172,16 +174,42 @@ export const GovaBroadcasterStudio: React.FC = () => {
 
   const handleClearTelemetry = async () => {
     try {
-      await fetch('/api/gova/telemetry', { method: 'DELETE' });
-      setTurns([]);
-      setStats({
-        totalTurnsLogged: 0,
-        retainedTurnsCount: 0,
-        filteredTurnsCount: 0,
-        averageSynthesisScore: 0,
-      });
+      const token = await getFreshIdToken();
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/gova/telemetry', { method: 'DELETE', headers });
+      if (res.ok) {
+        setTurns([]);
+        setStats({
+          totalTurnsLogged: 0,
+          retainedTurnsCount: 0,
+          filteredTurnsCount: 0,
+          averageSynthesisScore: 0,
+        });
+      }
     } catch (e) {
       console.warn('Failed to clear telemetry', e);
+    }
+  };
+
+  const handleExportJsonlCorpus = async () => {
+    try {
+      const token = await getFreshIdToken();
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/gova/export-jsonl?curatedOnly=true', { headers });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'gova_finetune_corpus.jsonl';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.warn('Failed to export JSONL corpus', e);
     }
   };
 
@@ -280,15 +308,15 @@ export const GovaBroadcasterStudio: React.FC = () => {
           </button>
         </div>
 
-        {/* JSONL Export Direct Link */}
-        <a
-          href="/api/gova/export-jsonl?curatedOnly=true"
-          download="gova_finetune_corpus.jsonl"
-          className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-medium transition-colors"
+        {/* JSONL Export Authenticated Action */}
+        <button
+          type="button"
+          onClick={handleExportJsonlCorpus}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-medium transition-colors cursor-pointer"
         >
           <Download className="w-3.5 h-3.5" />
           <span>Export JSONL Corpus</span>
-        </a>
+        </button>
       </div>
 
       {/* SUB-TAB 1: Interactive Live Console (Option A & Duplex Simulation) */}
@@ -760,14 +788,14 @@ export const GovaBroadcasterStudio: React.FC = () => {
                   Filter out any turns where the voice agent lapses into robotic customer-service cadences, retaining only high-density broadcast-style exchanges for your dataset pipeline.
                 </p>
                 <div className="mt-2 flex items-center gap-2">
-                  <a
-                    href="/api/gova/export-jsonl?curatedOnly=true"
-                    download="gova_finetune_corpus.jsonl"
-                    className="text-[11px] px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30 transition-colors inline-flex items-center gap-1"
+                  <button
+                    type="button"
+                    onClick={handleExportJsonlCorpus}
+                    className="text-[11px] px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30 transition-colors inline-flex items-center gap-1 cursor-pointer"
                   >
                     <Download className="w-3 h-3" />
                     <span>Download Curated Corpus ({stats.retainedTurnsCount} pairs)</span>
-                  </a>
+                  </button>
                 </div>
               </div>
             </div>

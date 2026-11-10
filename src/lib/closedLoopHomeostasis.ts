@@ -1,3 +1,28 @@
+export type SignalProvenanceTag = 'SIMULATED' | 'CONTROL_TARGET' | 'DERIVED';
+
+export interface ControlDeltaPacket {
+  adaptiveThresholdDampingMv: number;
+  inhibitoryGainRatio: number;
+  afferentGainBoost: number;
+  targetLtdLtpRatio: number;
+  gateDampingFactor: number;
+  phaseJitterTargetMs: number;
+  inhibitoryConductionVelocity: number;
+  dmaBurstModeEnabled: boolean;
+  targetCriticalBand: [number, number];
+  provenance: {
+    branchingRatio: SignalProvenanceTag;
+    meanFiringRateHz: SignalProvenanceTag;
+    signalToNoiseRatioDb: SignalProvenanceTag;
+    aerLatencyMs: SignalProvenanceTag;
+    adaptiveThresholdDampingMv: SignalProvenanceTag;
+    inhibitoryGainRatio: SignalProvenanceTag;
+    afferentGainBoost: SignalProvenanceTag;
+    targetLtdLtpRatio: SignalProvenanceTag;
+    gateDampingFactor: SignalProvenanceTag;
+  };
+}
+
 export interface ClosedLoopState {
   meanFiringRateHz: number;
   synapticOpsPerSec: number;
@@ -13,6 +38,7 @@ export interface ClosedLoopState {
   phaseJitterMs?: number;
   inhibitoryConductionVelocity?: number;
   bsiPhaseDitheringActive?: boolean;
+  lastControlDeltaPacket?: ControlDeltaPacket;
 }
 
 export interface AsynchronousPhaseDitheringResult {
@@ -23,6 +49,72 @@ export interface AsynchronousPhaseDitheringResult {
   bsiPhaseDitheringActive: boolean;
   preservedGlobalFiringRateHz: number;
   spectralFeedbackLagMs: number;
+}
+
+/**
+ * Pure Control-Delta Calculator:
+ * Reads measured telemetry and outputs ONLY actuator control signals without overwriting
+ * measured state variables (branchingRatio, meanFiringRateHz, signalToNoiseRatioDb, aerLatencyMs).
+ */
+export function computeHomeostaticControlDeltas(measured: {
+  corticalActiveFraction: number;
+  meanFiringRateHz: number;
+  ltdLtpRatio: number;
+  branchingRatio: number;
+  burstSynchronyIndex?: number;
+  divergenceRiskIndex?: number;
+  gateDampingFactor?: number;
+}): ControlDeltaPacket {
+  const valve = applySparseCodingBleedValve(
+    measured.corticalActiveFraction,
+    measured.meanFiringRateHz,
+    28.0,
+    0.48
+  );
+
+  const afferentGainBoost = Number(
+    (0.65 / Math.max(0.45, measured.corticalActiveFraction)).toFixed(3)
+  );
+
+  const targetLtdLtpRatio = Number(
+    Math.max(1.25, measured.ltdLtpRatio + (1.28 - measured.ltdLtpRatio) * 0.30).toFixed(2)
+  );
+
+  const dri = measured.divergenceRiskIndex ?? 0.03;
+  const currentGate = measured.gateDampingFactor ?? 1.0;
+  const gateDampingFactor =
+    dri >= 0.35
+      ? 0.76
+      : Number((currentGate + (1.0 - currentGate) * 0.30).toFixed(3));
+
+  const phaseDither = evaluateAsynchronousPhaseDithering(
+    measured.burstSynchronyIndex ?? 0.19,
+    valve.inhibitoryGainRatio,
+    measured.meanFiringRateHz
+  );
+
+  return {
+    adaptiveThresholdDampingMv: valve.adaptiveThresholdDampingMv,
+    inhibitoryGainRatio: valve.inhibitoryGainRatio,
+    afferentGainBoost,
+    targetLtdLtpRatio,
+    gateDampingFactor,
+    phaseJitterTargetMs: phaseDither.bsiPhaseDitheringActive ? phaseDither.phaseJitterMs : 0.45,
+    inhibitoryConductionVelocity: phaseDither.inhibitoryConductionVelocity,
+    dmaBurstModeEnabled: true,
+    targetCriticalBand: [0.98, 1.06],
+    provenance: {
+      branchingRatio: 'SIMULATED',
+      meanFiringRateHz: 'SIMULATED',
+      signalToNoiseRatioDb: 'DERIVED',
+      aerLatencyMs: 'SIMULATED',
+      adaptiveThresholdDampingMv: 'CONTROL_TARGET',
+      inhibitoryGainRatio: 'CONTROL_TARGET',
+      afferentGainBoost: 'CONTROL_TARGET',
+      targetLtdLtpRatio: 'CONTROL_TARGET',
+      gateDampingFactor: 'CONTROL_TARGET',
+    },
+  };
 }
 
 /**
@@ -181,7 +273,8 @@ export class KeelStressTester {
 
 /**
  * HOMEOSYNAPTIC SCALING & SPARSE CODING COMPENSATOR
- * Keeps corticalActiveFraction at 0.50 AND holds meanFiringRateHz at ~28.0 Hz
+ * Computes control deltas first via computeHomeostaticControlDeltas, then applies
+ * closed-loop plant response for shadow-simulation trials.
  */
 export function stepBalancedHomeostasis(state: {
   corticalActiveFraction: number;
@@ -191,7 +284,8 @@ export function stepBalancedHomeostasis(state: {
   signalToNoiseRatioDb: number;
   phaseJitterMs: number;
   inhibitoryGainRatio: number;
-}) {
+}): ControlDeltaPacket {
+  const controlDeltas = computeHomeostaticControlDeltas(state);
   const targetActive = 0.50; // Safe middle of [0.15, 0.70], avoids 0.45 hypo-active floor
   const targetRateHz = 28.0;
 
@@ -201,8 +295,6 @@ export function stepBalancedHomeostasis(state: {
   );
 
   // 2. Conservation of Drive (Synaptic Scaling):
-  // When active crowd drops from 0.65 -> 0.50, boost afferent gain by (0.65 / f_act)
-  // so the remaining 50% active neurons maintain the 28.0 Hz global rate setpoint!
   const afferentGainBoost = 0.65 / Math.max(0.45, state.corticalActiveFraction);
   const rawRate = 21.5 * afferentGainBoost; // Scales 21.5 Hz -> ~27.95 Hz
   state.meanFiringRateHz = Number(
@@ -210,19 +302,18 @@ export function stepBalancedHomeostasis(state: {
   );
 
   // 3. Relax LTD/LTP depression from 1.50 -> 1.28 so sparse spikes don't get extinguished
-  const targetLtdLtp = 1.28;
-  state.ltdLtpRatio = Number(
-    (state.ltdLtpRatio + (targetLtdLtp - state.ltdLtpRatio) * 0.30).toFixed(2)
-  );
+  state.ltdLtpRatio = controlDeltas.targetLtdLtpRatio;
 
-  // 4. Restore Critical Branching (σ -> 1.002) and lift SNR above 13.5 dB
+  // 4. Plant response for critical branching (within [0.98, 1.06] natural band) and spectral SNR
   state.branchingRatio = Number(
     (1.002 - 0.04 * (state.ltdLtpRatio - 1.28)).toFixed(3)
   );
-  state.phaseJitterMs = 0.45;
+  state.phaseJitterMs = controlDeltas.phaseJitterTargetMs;
   state.signalToNoiseRatioDb = Number(
     (11.1 + 10 * Math.log10(0.65 / state.corticalActiveFraction) + 4.5 * (1.20 - state.phaseJitterMs)).toFixed(1)
   );
+
+  return controlDeltas;
 }
 
 export function stepClosedLoopHomeostasis(
@@ -230,20 +321,17 @@ export function stepClosedLoopHomeostasis(
   targetRateHz = 28.0,
   maxPowerMw = 5.0
 ): ClosedLoopState {
-  // Sparse Coding Bleed-Off Valve + Balanced Homeostasis Compensator:
   const currentCorticalFraction = state.corticalActiveFraction ?? 0.50;
-  const valve = applySparseCodingBleedValve(
-    currentCorticalFraction,
-    state.meanFiringRateHz,
-    targetRateHz,
-    0.48
-  );
+  const controlDeltas = computeHomeostaticControlDeltas({
+    corticalActiveFraction: currentCorticalFraction,
+    meanFiringRateHz: state.meanFiringRateHz,
+    ltdLtpRatio: state.ltdLtpRatio,
+    branchingRatio: state.branchingRatio,
+    burstSynchronyIndex: state.burstSynchronyIndex,
+  });
 
-  // 1. Apply the computed inhibitory gain to the live synapticStability metric
-  state.inhibitoryGainRatio = valve.inhibitoryGainRatio;
+  state.inhibitoryGainRatio = controlDeltas.inhibitoryGainRatio;
 
-  // 2. Execute Homeosynaptic Scaling & Sparse Coding Compensator (stepBalancedHomeostasis)
-  // Holds corticalActiveFraction at 0.50, meanFiringRateHz at ~28.0 Hz, LTD/LTP at 1.28, σ at 1.002, and SNR > 13.5 dB
   const balancedDraft = {
     corticalActiveFraction: currentCorticalFraction,
     meanFiringRateHz: state.meanFiringRateHz,
@@ -308,16 +396,17 @@ export function stepClosedLoopHomeostasis(
     signalToNoiseRatioDb: nextSnrDb,
     corticalActiveFraction: state.corticalActiveFraction,
     inhibitoryGainRatio: state.inhibitoryGainRatio,
-    adaptiveThresholdDampingMv: valve.adaptiveThresholdDampingMv,
+    adaptiveThresholdDampingMv: controlDeltas.adaptiveThresholdDampingMv,
     phaseJitterMs: effectivePhaseJitterMs,
     inhibitoryConductionVelocity: phaseDither.inhibitoryConductionVelocity,
     bsiPhaseDitheringActive: phaseDither.bsiPhaseDitheringActive,
+    lastControlDeltaPacket: controlDeltas,
   };
 }
 
 // ============================================================================
 // PART 1: EDGE FIRMWARE & KEEL REFLEX SUBSTRATE PATCH
-// Prevents DRI = 0.46 flash spikes, quantizes weights to INT8, & cuts AER latency < 1ms
+// Computes actuator ControlDeltaPacket while respecting natural [0.98, 1.06] σ band
 // ============================================================================
 export function stepEdgeFirmwareAndKeelReflex(state: {
   divergenceRiskIndex: number;
@@ -332,9 +421,17 @@ export function stepEdgeFirmwareAndKeelReflex(state: {
   gateDampingFactor: number;
   traumaState: number;
   droppedSignalCount: number;
-}) {
+}): ControlDeltaPacket {
+  const controlDeltas = computeHomeostaticControlDeltas({
+    corticalActiveFraction: state.corticalActiveFraction,
+    meanFiringRateHz: state.meanFiringRateHz,
+    ltdLtpRatio: state.ltdLtpRatio,
+    branchingRatio: state.branchingRatio,
+    divergenceRiskIndex: state.divergenceRiskIndex,
+    gateDampingFactor: state.gateDampingFactor,
+  });
+
   // 1. 8-BIT FIXED-POINT WEIGHT QUANTIZATION (Maps [0.20, 1.20] -> uint8 [0..255])
-  // Prevents unconstrained floating-point STDP drift up to 0.728w
   const wClamped = state.divergenceRiskIndex > 0.25
     ? Math.min(0.685, state.meanSynapticWeight) // Proactive RSI rollback clamp on warning
     : Math.min(1.20, Math.max(0.20, state.meanSynapticWeight));
@@ -342,31 +439,38 @@ export function stepEdgeFirmwareAndKeelReflex(state: {
   state.meanSynapticWeight = Number((0.20 + (wInt8 / 255) * 1.00).toFixed(3));
 
   // 2. CROSS-SUBSYSTEM KEEL REFLEX (Couples Critical DRI >= 0.35 to Constitutional Gate)
-  // If DRI flashes like it did at 04:23:04Z (0.46), Keel clamps immediately to help STDP
   if (state.divergenceRiskIndex >= 0.35) {
     state.gateDampingFactor = 0.76; // Instant constitutional brake
     state.traumaState = Number(Math.min(0.09, (state.divergenceRiskIndex - 0.25) * 0.4).toFixed(3));
     state.droppedSignalCount = Math.min(12, Math.round((state.divergenceRiskIndex - 0.25) * 35));
     state.divergenceRiskIndex = Number((state.divergenceRiskIndex * 0.45).toFixed(2)); // Fast quench
   } else {
-    // Smooth ventral recovery back to gate = 1.0, trauma = 0
-    state.gateDampingFactor = Number((state.gateDampingFactor + (1.0 - state.gateDampingFactor) * 0.3).toFixed(3));
+    state.gateDampingFactor = controlDeltas.gateDampingFactor;
     state.traumaState = Number(Math.max(0, state.traumaState * 0.7 - 0.005).toFixed(3));
     state.droppedSignalCount = Math.max(0, Math.round(state.droppedSignalCount * 0.5 - 1));
   }
 
   // 3. ZERO-COPY DMA RING BUFFER OPTIMIZATION (Sub-1ms AER Latency & Sub-4.2mW Power)
-  // Replaces byte-by-byte polling (1.12ms) with 64-byte burst DMA transfer (~0.84ms)
-  const dmaBurstEfficiency = 0.75; // 25% latency reduction on asynchronous crossbar
-  state.aerLatencyMs = Number((1.12 * dmaBurstEfficiency).toFixed(2)); // 1.12ms -> 0.84ms
-  state.jitterMs = Number((state.jitterMs * 0.82).toFixed(2));         // 0.56ms -> 0.46ms
+  const dmaBurstEfficiency = controlDeltas.dmaBurstModeEnabled ? 0.75 : 1.0;
+  state.aerLatencyMs = Number((Math.min(1.12, state.aerLatencyMs) * dmaBurstEfficiency).toFixed(2));
+  state.jitterMs = Number((state.jitterMs * 0.82).toFixed(2));
 
-  // 4. HOLD SPARSE GAIN COMPENSATION SO LTD/LTP STAYS AT 1.28 (NOT 1.50)
+  // 4. APPLY CONTROL TARGET DELTAS & PRESERVE NATURAL CRITICAL BAND [0.98, 1.06]
   state.ltdLtpRatio = Number((state.ltdLtpRatio + (1.28 - state.ltdLtpRatio) * 0.35).toFixed(2));
-  state.corticalActiveFraction = 0.48;
+  state.corticalActiveFraction = Number(
+    (state.corticalActiveFraction + (0.48 - state.corticalActiveFraction) * 0.35).toFixed(3)
+  );
   state.meanFiringRateHz = Number((27.5 * state.gateDampingFactor).toFixed(1));
-  state.powerMw = Number((3.85 + 0.011 * state.meanFiringRateHz).toFixed(2)); // ~4.15 mW
-  state.branchingRatio = 1.000;
+  state.powerMw = Number((3.85 + 0.011 * state.meanFiringRateHz).toFixed(2));
+  // Preserve natural branchingRatio dynamics when inside [0.98, 1.06]; gently pull toward band center when outside
+  const [minCrit, maxCrit] = controlDeltas.targetCriticalBand;
+  if (state.branchingRatio < minCrit || state.branchingRatio > maxCrit) {
+    state.branchingRatio = Number(
+      (state.branchingRatio + (1.000 - state.branchingRatio) * 0.35).toFixed(3)
+    );
+  }
+
+  return controlDeltas;
 }
 
 // ============================================================================

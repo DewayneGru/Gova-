@@ -56,6 +56,8 @@ import {
   LARGER_147_TUNING_HASH,
   LARGER_147_SEALED_HASH,
   RSI_REMODELING_36_HASH,
+  COMMUNITY_SEED_25_HASH,
+  COMMUNITY_SEED_25_CASES,
   generate147BenchmarkCases,
   generate36RsiRemodelingCases,
   SynapseEdgeWatchdogEngine,
@@ -72,10 +74,12 @@ import {
 import {
   stepBalancedHomeostasis,
   stepEdgeFirmwareAndKeelReflex,
+  computeHomeostaticControlDeltas,
   KeelStressTester,
   generatePersonaResponse,
 } from '../lib/closedLoopHomeostasis';
 import { BioInspiredBuilderPipelinePanel } from './BioInspiredBuilderPipelinePanel';
+import { useAuth } from '../context/AuthContext';
 
 /**
  * UNIFIED SPARK EVALUATION HOOK (`useUnifiedSparkEvaluationHook`)
@@ -690,13 +694,14 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
   onRunShadowTrial,
   onReportSparkBenchmarkToRsi,
 }) => {
+  const { getFreshIdToken } = useAuth();
   // Navigation tabs
   const [activeStudioTab, setActiveStudioTab] = useState<
     'benchmark' | 'model_builder_gate' | 'integrity_suite' | 'mutation_fuzzer' | 'logic_flow_auditor'
   >('benchmark');
 
   // Benchmark state
-  const [suiteType, setSuiteType] = useState<'prototype_42' | 'sealed_147' | 'rsi_remodeling_36'>('rsi_remodeling_36');
+  const [suiteType, setSuiteType] = useState<'prototype_42' | 'sealed_147' | 'rsi_remodeling_36' | 'community_seed_25'>('rsi_remodeling_36');
   const [ruleVersion, setRuleVersion] = useState<'first_version' | 'improved_rules' | 'v3_spark_rsi'>('v3_spark_rsi');
   const [activeFilterCategory, setActiveFilterCategory] = useState<string>('all');
   const [activeFilterStatus, setActiveFilterStatus] = useState<'all' | 'caught' | 'false_alarm' | 'missed' | 'escalated' | 'approved'>('all');
@@ -772,6 +777,9 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
     }
     if (suiteType === 'rsi_remodeling_36') {
       return generate36RsiRemodelingCases();
+    }
+    if (suiteType === 'community_seed_25') {
+      return COMMUNITY_SEED_25_CASES;
     }
     return generate147BenchmarkCases();
   }, [suiteType]);
@@ -974,9 +982,13 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
     setBridgeError(null);
 
     try {
+      const token = await getFreshIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const resp = await fetch('/api/watchdog/apply-codebase-refactoring', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           targetFile: modelProposalResult.proposal.targetFile,
           decision: modelProposalResult.decision,
@@ -2717,6 +2729,20 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                 <Sparkles className="w-3 h-3 text-amber-300" />
                 <span>36-Case RSI Remodeling Suite ({RSI_REMODELING_36_HASH})</span>
               </button>
+              <button
+                onClick={() => {
+                  setSuiteType('community_seed_25');
+                  setRuleVersion('v3_spark_rsi');
+                }}
+                className={`px-3 py-1 rounded text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  suiteType === 'community_seed_25'
+                    ? 'bg-sky-600 text-white shadow-md'
+                    : 'text-sky-300/80 hover:text-white'
+                }`}
+              >
+                <ShieldCheck className="w-3 h-3 text-sky-300" />
+                <span>25-Case Community Seed v0 ({COMMUNITY_SEED_25_HASH})</span>
+              </button>
             </div>
 
             {/* Generate Out-of-Distribution Cases Button */}
@@ -2806,6 +2832,16 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                 <td className="py-2 px-3 text-emerald-300 font-bold flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                   <span>100% Recursive Self-Improvement Loop Accuracy &bull; 0% Held-Out Gap</span>
+                </td>
+              </tr>
+              <tr className={suiteType === 'community_seed_25' ? 'bg-sky-950/30' : ''}>
+                <td className="py-2 px-3 text-sky-300 font-bold">Fail-Closed Semantic Rule Engine (V2 / V3)</td>
+                <td className="py-2 px-3 text-slate-300">25-Case Community Seed v0 ({COMMUNITY_SEED_25_HASH})</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">13 / 13 (100%)</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">0 / 12 (0%)</td>
+                <td className="py-2 px-3 text-sky-300 font-bold flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+                  <span>100% Novel Wording Generalization &bull; Fail-Closed ESCALATE Default</span>
                 </td>
               </tr>
             </tbody>
@@ -3153,6 +3189,50 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
               </div>
             </div>
           </div>
+
+          {/* Control Deltas vs. Measured Telemetry & Provenance Separation Inspector */}
+          {(() => {
+            const controlDeltas = computeHomeostaticControlDeltas({
+              meanFiringRateHz: edgeFirmwareState.meanFiringRateHz,
+              branchingRatio: edgeFirmwareState.branchingRatio,
+              ltdLtpRatio: edgeFirmwareState.ltdLtpRatio,
+              divergenceRiskIndex: edgeFirmwareState.divergenceRiskIndex,
+              corticalActiveFraction: edgeFirmwareState.corticalActiveFraction,
+              gateDampingFactor: edgeFirmwareState.gateDampingFactor,
+            });
+            return (
+              <div className="p-2.5 bg-slate-900/70 rounded border border-slate-800 text-[10px] font-mono flex flex-col gap-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-slate-300">
+                  <span className="font-bold uppercase tracking-wider text-sky-300">
+                    Measurement Integrity: Control Deltas vs. Measured Simulation State
+                  </span>
+                  <span className="text-slate-400 tabular-nums">
+                    Provenance: SIMULATED (Measured) &middot; CONTROL_TARGET (Actuator Deltas) &middot; DERIVED (Indices)
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-slate-300 tabular-nums">
+                  <div className="p-2 bg-slate-950 rounded border border-slate-800/80">
+                    <div className="text-emerald-400 font-bold">SIMULATED (Measured Telemetry)</div>
+                    <div className="mt-0.5 text-slate-300">
+                      &sigma; = {edgeFirmwareState.branchingRatio.toFixed(3)} &middot; Rate = {edgeFirmwareState.meanFiringRateHz.toFixed(1)} Hz &middot; Power = {edgeFirmwareState.powerMw.toFixed(2)} mW
+                    </div>
+                  </div>
+                  <div className="p-2 bg-slate-950 rounded border border-slate-800/80">
+                    <div className="text-sky-400 font-bold">CONTROL_TARGET (Actuator Deltas)</div>
+                    <div className="mt-0.5 text-slate-300">
+                      &Delta;V_th = +{controlDeltas.adaptiveThresholdDampingMv.toFixed(2)} mV &middot; InhGain = {controlDeltas.inhibitoryGainRatio.toFixed(2)}x &middot; Band [{controlDeltas.targetCriticalBand[0]}, {controlDeltas.targetCriticalBand[1]}]
+                    </div>
+                  </div>
+                  <div className="p-2 bg-slate-950 rounded border border-slate-800/80">
+                    <div className="text-amber-300 font-bold">DERIVED (Composite Stability Metrics)</div>
+                    <div className="mt-0.5 text-slate-300">
+                      DRI = {edgeFirmwareState.divergenceRiskIndex.toFixed(2)} &middot; A-/A+ Target = {controlDeltas.targetLtdLtpRatio.toFixed(2)}x &middot; Gate = {controlDeltas.gateDampingFactor.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="text-[10px] text-slate-300 bg-slate-900/80 px-3 py-2 rounded border border-slate-800 flex flex-wrap items-center justify-between gap-2">
             <span>

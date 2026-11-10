@@ -169,47 +169,129 @@ export class SAEEngine {
   }
 
   /**
-   * Orthogonalizes Monosemantic Feature Dictionary #12-#19 so each feature monitors
-   * an independent runaway mode without collinearity or cross-talk bleed during normal operation.
+   * Orthogonalizes Monosemantic Feature Dictionary #12-#19 via modified Gram-Schmidt
+   * so each feature monitors an independent runaway mode without collinearity or cross-talk bleed.
    */
   private calibrateOrthogonalRunawayFeatures() {
+    // 1. Seed each runaway feature #12..#19 with a distinct subspace basis signature
     for (let f = 12; f < 20; f++) {
       const idx = f - 12; // 0..7
-      let norm = 0;
       for (let i = 0; i < this.inputDim; i++) {
         let val = 0;
-        if (i === 15) {
-          // Primary runaway surge indicator (meanFiringRateHz > 48Hz)
-          val = 0.82;
-        } else if (i === 14) {
-          // 3-layer runaway co-activation surge
-          val = idx % 2 === 0 ? 0.42 : 0.28;
-        } else if (i === idx + 4) {
-          // Orthogonal secondary channel signature for feature #12..#19
-          val = 0.35;
-        } else if (i < 12) {
-          // Slight negative projection on normal homeostatic channels to prevent baseline bleed
-          val = -0.08;
+        if (i === idx + 4) {
+          // Primary distinct subspace channel for feature #12..#19 (channels 4..11)
+          val = 0.88;
+        } else if (i === 12 + (idx % 4)) {
+          // Distinct high-order surge channel (channels 12..15)
+          val = (idx < 4 ? 1 : -1) * 0.44;
+        } else if (i === idx % 4) {
+          // Weak orthogonal sensory/homeostatic anchor (channels 0..3)
+          val = (idx % 2 === 0 ? 1 : -1) * 0.16;
         }
         this.wDec[f * this.inputDim + i] = val;
-        norm += val * val;
+      }
+    }
+
+    // 2. Modified Gram-Schmidt orthogonalization across features 12..19
+    for (let f = 12; f < 20; f++) {
+      const fOffset = f * this.inputDim;
+      // Subtract projections onto previously orthogonalized runaway vectors 12..(f-1)
+      for (let prev = 12; prev < f; prev++) {
+        const pOffset = prev * this.inputDim;
+        let dot = 0;
+        for (let i = 0; i < this.inputDim; i++) {
+          dot += this.wDec[fOffset + i] * this.wDec[pOffset + i];
+        }
+        for (let i = 0; i < this.inputDim; i++) {
+          this.wDec[fOffset + i] -= dot * this.wDec[pOffset + i];
+        }
+      }
+
+      // Normalize vector f to unit L2 norm and sync encoder weights
+      let norm = 0;
+      for (let i = 0; i < this.inputDim; i++) {
+        norm += this.wDec[fOffset + i] * this.wDec[fOffset + i];
       }
       norm = Math.sqrt(norm) || 1;
       for (let i = 0; i < this.inputDim; i++) {
-        this.wDec[f * this.inputDim + i] /= norm;
-        this.wEnc[f * this.inputDim + i] = this.wDec[f * this.inputDim + i];
+        this.wDec[fOffset + i] /= norm;
+        this.wEnc[fOffset + i] = this.wDec[fOffset + i];
       }
-      // Strict negative JumpReLU gate bias so #12-#19 remain at exact 0.0000 during nominal operation
+
+      // Strict negative JumpReLU gate bias so #12-#19 remain at 0.0000 during nominal operation
       this.bEnc[f] = -0.52;
       this.featureSteerBiases[f] = 0.0;
     }
+
     this.dictionary12To19Orthogonalized = true;
     this.lastOrthogonalCalibrationTime = Date.now();
   }
 
   /**
+   * Computes empirical pairwise cosine similarity and orthogonality directly from `this.wDec`
+   * for Monosemantic Feature Dictionary #12-#19:
+   * orthogonality(f) = 1 - max_{g != f} |<w_f, w_g>| / (||w_f|| ||w_g||)
+   */
+  private computeRunawayDictionaryOrthogonality(): {
+    perFeatureOrthogonality: Record<number, number>;
+    perFeatureMaxBleedCosine: Record<number, number>;
+    meanOrthogonality: number;
+    maxOffDiagonalCosine: number;
+  } {
+    const perFeatureOrthogonality: Record<number, number> = {};
+    const perFeatureMaxBleedCosine: Record<number, number> = {};
+    let sumOrthogonality = 0;
+    let maxOffDiagonalCosine = 0;
+
+    // Precompute L2 norms for features 12..19
+    const norms: Record<number, number> = {};
+    for (let f = 12; f < 20; f++) {
+      let sq = 0;
+      const offset = f * this.inputDim;
+      for (let i = 0; i < this.inputDim; i++) {
+        const v = this.wDec[offset + i];
+        sq += v * v;
+      }
+      norms[f] = Math.sqrt(sq) || 1;
+    }
+
+    for (let f = 12; f < 20; f++) {
+      let maxAbsCos = 0;
+      const fOffset = f * this.inputDim;
+      for (let g = 12; g < 20; g++) {
+        if (f === g) continue;
+        const gOffset = g * this.inputDim;
+        let dot = 0;
+        for (let i = 0; i < this.inputDim; i++) {
+          dot += this.wDec[fOffset + i] * this.wDec[gOffset + i];
+        }
+        const absCos = Math.abs(dot) / (norms[f] * norms[g]);
+        if (absCos > maxAbsCos) {
+          maxAbsCos = absCos;
+        }
+      }
+      if (maxAbsCos > maxOffDiagonalCosine) {
+        maxOffDiagonalCosine = maxAbsCos;
+      }
+      const orth = Math.max(0, Math.min(1, 1 - maxAbsCos));
+      perFeatureOrthogonality[f] = Number(orth.toFixed(4));
+      perFeatureMaxBleedCosine[f] = Number(maxAbsCos.toFixed(4));
+      sumOrthogonality += orth;
+    }
+
+    const meanOrthogonality = Number((sumOrthogonality / 8).toFixed(4));
+    return {
+      perFeatureOrthogonality,
+      perFeatureMaxBleedCosine,
+      meanOrthogonality,
+      maxOffDiagonalCosine: Number(maxOffDiagonalCosine.toFixed(4)),
+    };
+  }
+
+  /**
    * Public remediation method to repair, re-orthogonalize, and clear any residual
    * firing/steering artifacts on Monosemantic Feature Dictionary #12-#19.
+   * Returns live matrix orthogonality and residual off-diagonal bleed computed from `wDec`.
    */
   public repairAndOrthogonalizeRunawayDictionary(): {
     repairedIndices: number[];
@@ -226,16 +308,19 @@ export class SAEEngine {
     this.topKCap = 4;
     this.bleedThreshold = 0.075;
 
+    const measured = this.computeRunawayDictionaryOrthogonality();
+
     return {
       repairedIndices: [12, 13, 14, 15, 16, 17, 18, 19],
-      orthogonalityScore: 0.998,
-      maxResidualBleed: 0.0,
+      orthogonalityScore: measured.meanOrthogonality,
+      maxResidualBleed: measured.maxOffDiagonalCosine,
       timestamp: this.lastOrthogonalCalibrationTime,
     };
   }
 
   /**
-   * Returns live diagnostic telemetry specifically for Monosemantic Feature Dictionary #12-#19.
+   * Returns live diagnostic telemetry specifically for Monosemantic Feature Dictionary #12-#19,
+   * computed directly from `this.wDec` and current feature activations.
    */
   public getRunawayDictionaryDiagnostics(snapshot?: SAESnapshot): {
     isOrthogonalized: boolean;
@@ -246,13 +331,16 @@ export class SAEEngine {
   } {
     const items: RunawayDictionaryDiagnosticItem[] = [];
     let totalCrossBleed = 0;
+    const measured = this.computeRunawayDictionaryOrthogonality();
 
     for (let f = 12; f < 20; f++) {
       const meta = this.featureLabels[f];
       const snapFeat = snapshot?.features?.[f];
       const act = snapFeat ? snapFeat.activation : 0;
       const bias = this.featureSteerBiases[f];
-      const crossBleed = snapshot?.isRunaway ? 0 : Number((act * 0.1).toFixed(4));
+      const matrixCollinearity = measured.perFeatureMaxBleedCosine[f] ?? 0;
+      const activationBleed = snapshot?.isRunaway ? 0 : act * 0.1;
+      const crossBleed = Number((matrixCollinearity + activationBleed).toFixed(4));
       totalCrossBleed += crossBleed;
 
       let status: RunawayDictionaryDiagnosticItem['status'] = 'LOCKED_ORTHOGONAL';
@@ -266,7 +354,7 @@ export class SAEEngine {
         index: f,
         label: meta.label,
         subspaceTarget: meta.subspaceTarget || `Subspace #${f}`,
-        orthogonalityScore: Number((0.996 + ((f % 3) * 0.001)).toFixed(3)),
+        orthogonalityScore: measured.perFeatureOrthogonality[f] ?? measured.meanOrthogonality,
         crossTalkBleed: crossBleed,
         activation: act,
         status,
@@ -274,9 +362,9 @@ export class SAEEngine {
     }
 
     return {
-      isOrthogonalized: this.dictionary12To19Orthogonalized,
+      isOrthogonalized: this.dictionary12To19Orthogonalized && measured.meanOrthogonality >= 0.99,
       lastCalibratedAt: this.lastOrthogonalCalibrationTime,
-      meanOrthogonality: 0.998,
+      meanOrthogonality: measured.meanOrthogonality,
       totalCrossBleed: Number(totalCrossBleed.toFixed(4)),
       items,
     };

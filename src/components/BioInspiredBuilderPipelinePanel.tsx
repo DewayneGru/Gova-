@@ -24,6 +24,7 @@ import {
   BioInspiredBlueprintId,
   BioInspiredBuilderPipelineResult,
 } from '../lib/geminiSparkWrapper';
+import { useAuth } from '../context/AuthContext';
 
 interface BioInspiredBuilderPipelinePanelProps {
   engine?: SNNEngine;
@@ -40,6 +41,7 @@ export const BioInspiredBuilderPipelinePanel: React.FC<BioInspiredBuilderPipelin
   onRunShadowTrial,
   compact = false,
 }) => {
+  const { getFreshIdToken } = useAuth();
   const [selectedBlueprintId, setSelectedBlueprintId] = useState<BioInspiredBlueprintId>(
     'sparse_coding_bleed_valve'
   );
@@ -141,9 +143,12 @@ export const BioInspiredBuilderPipelinePanel: React.FC<BioInspiredBuilderPipelin
       let rollbackHash = currentPipe.stage2WatchdogGate.preBuildSnapshotHash;
 
       try {
+        const token = await getFreshIdToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
         const resp = await fetch('/api/watchdog/apply-codebase-refactoring', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             targetFile: currentPipe.stage1ModelBioProposal.targetFile,
             decision: currentPipe.stage2WatchdogGate.decision,
@@ -193,7 +198,7 @@ export const BioInspiredBuilderPipelinePanel: React.FC<BioInspiredBuilderPipelin
 
       setIsRunningPipeline(false);
     },
-    [pipelineResult, engine, activeTuning, onApplyAdjustments]
+    [pipelineResult, engine, activeTuning, onApplyAdjustments, getFreshIdToken]
   );
 
   // Full 1-Click End-to-End Pipeline: Model Suggests -> Watchdog -> Spark Agent Reviews -> Builder Builds Into Model

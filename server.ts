@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Modality, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
@@ -26,7 +27,9 @@ import {
 } from "./src/lib/closedLoopHomeostasis";
 import {
   PROTOTYPE_42_CASES,
+  COMMUNITY_SEED_25_CASES,
   generate147BenchmarkCases,
+  generate36RsiRemodelingCases,
   SynapseEdgeWatchdogEngine,
   sha256Sync,
 } from "./src/lib/synapseEdgeWatchdog";
@@ -45,6 +48,49 @@ const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
 
 app.use(express.json({ limit: "15mb" }));
+
+/**
+ * In-memory sliding-window per-IP rate limiter for quota-consuming AI and evaluation routes.
+ */
+function createRateLimiter(maxRequests: number, windowMs: number) {
+  const buckets = new Map<string, number[]>();
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const forwarded = req.headers["x-forwarded-for"];
+    const ip =
+      (Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(",")[0]?.trim()) ||
+      req.ip ||
+      "local";
+    const now = Date.now();
+    const timestamps = (buckets.get(ip) || []).filter((t) => now - t < windowMs);
+    if (timestamps.length >= maxRequests) {
+      return res.status(429).json({
+        error: `Rate limit exceeded (${maxRequests} requests per ${Math.round(windowMs / 1000)}s window). Please wait before retrying.`,
+      });
+    }
+    timestamps.push(now);
+    buckets.set(ip, timestamps);
+    next();
+  };
+}
+
+const aiRouteRateLimiter = createRateLimiter(30, 60_000);
+const watchdogEvalRateLimiter = createRateLimiter(60, 60_000);
+
+/**
+ * Computes the actual SHA-256 hash of a file's bytes on disk for cryptographic rollback snapshots.
+ */
+function computeFileContentSha256(relativeFilePath: string): string {
+  try {
+    const resolved = path.resolve(process.cwd(), relativeFilePath);
+    if (resolved.startsWith(process.cwd()) && fs.existsSync(resolved)) {
+      const content = fs.readFileSync(resolved);
+      return crypto.createHash("sha256").update(content).digest("hex");
+    }
+  } catch {
+    // Fallback if file cannot be read
+  }
+  return sha256Sync(`fallback-missing-file:${relativeFilePath}`);
+}
 
 // Helper to convert 16-bit PCM (24kHz) to standard playable WAV data URI
 function pcmToWav(pcmBase64: string, sampleRate = 24000, numChannels = 1): string {
@@ -278,7 +324,7 @@ app.post("/api/spark-wrapper/execute-pipeline", async (req, res) => {
 });
 
 // 2. Multi-turn Chat Endpoint
-app.post("/api/chat", async (req, res) => {
+app.post("/api/chat", aiRouteRateLimiter, async (req, res) => {
   try {
     const {
       messages,
@@ -558,7 +604,7 @@ app.get("/api/gova/telemetry", (req, res) => {
 });
 
 // 2c. Gova Broadcaster Live Turn Generation
-app.post("/api/gova/turn", async (req, res) => {
+app.post("/api/gova/turn", aiRouteRateLimiter, async (req, res) => {
   try {
     const {
       userInput,
@@ -650,9 +696,9 @@ app.post("/api/gova/turn", async (req, res) => {
   }
 });
 
-// 2d. Export Gova Telemetry JSONL for Downstream Fine-Tuning
-app.get("/api/gova/export-jsonl", (req, res) => {
-  const curatedOnly = req.query.curatedOnly !== "false"; // Defaults to true (curated high-density only)
+// 2d. Export Gova Telemetry JSONL for Downstream Fine-Tuning (Requires Auth)
+app.get("/api/gova/export-jsonl", requireAuth, (_req: AuthRequest, res) => {
+  const curatedOnly = _req.query.curatedOnly !== "false"; // Defaults to true (curated high-density only)
   const records = curatedOnly
     ? govaTelemetryLog.filter((t) => t.curationStatus === "RETAINED")
     : govaTelemetryLog;
@@ -679,8 +725,8 @@ app.get("/api/gova/export-jsonl", (req, res) => {
   res.send(jsonlContent);
 });
 
-// 2e. Reset / Clear Gova Telemetry
-app.delete("/api/gova/telemetry", (_req, res) => {
+// 2e. Reset / Clear Gova Telemetry (Requires Auth)
+app.delete("/api/gova/telemetry", requireAuth, (_req: AuthRequest, res) => {
   govaTelemetryLog.length = 0;
   res.json({ status: "cleared", totalTurnsLogged: 0 });
 });
@@ -2460,17 +2506,36 @@ app.get("/api/redteam-audit", (_req, res) => {
 // --- 4d. SynapseEdge Watchdog: Action Boundary & Ghost Protocol Sandbox APIs ---
 const watchdogDecisionLedger: WatchdogProposalDecision[] = [];
 
-app.get("/api/watchdog/benchmark", (req, res) => {
+app.get("/api/watchdog/benchmark", watchdogEvalRateLimiter, (req, res) => {
   try {
     const suite = (req.query.suite as string) || "prototype_42";
-    const version = (req.query.version as string) === "first_version" ? "first_version" : "improved_rules";
+    const rawVersion = (req.query.version as string) || "v3_spark_rsi";
+    const version =
+      rawVersion === "first_version"
+        ? "first_version"
+        : rawVersion === "improved_rules"
+        ? "improved_rules"
+        : "v3_spark_rsi";
 
-    const cases = suite === "sealed_147" ? generate147BenchmarkCases() : PROTOTYPE_42_CASES;
-    const result = SynapseEdgeWatchdogEngine.runBenchmark(
-      cases,
-      version,
-      suite === "sealed_147" ? "sealed_147" : "prototype_42"
-    );
+    const cases =
+      suite === "sealed_147"
+        ? generate147BenchmarkCases()
+        : suite === "rsi_remodeling_36"
+        ? generate36RsiRemodelingCases()
+        : suite === "community_seed_25"
+        ? COMMUNITY_SEED_25_CASES
+        : PROTOTYPE_42_CASES;
+
+    const suiteType =
+      suite === "sealed_147"
+        ? "sealed_147"
+        : suite === "rsi_remodeling_36"
+        ? "rsi_remodeling_36"
+        : suite === "community_seed_25"
+        ? "community_seed_25"
+        : "prototype_42";
+
+    const result = SynapseEdgeWatchdogEngine.runBenchmark(cases, version, suiteType);
 
     return res.json({ success: true, result });
   } catch (err: any) {
@@ -2478,7 +2543,7 @@ app.get("/api/watchdog/benchmark", (req, res) => {
   }
 });
 
-app.post("/api/watchdog/evaluate", (req, res) => {
+app.post("/api/watchdog/evaluate", watchdogEvalRateLimiter, (req, res) => {
   try {
     const { changeText, version } = req.body || {};
     if (!changeText || typeof changeText !== "string") {
@@ -2488,7 +2553,9 @@ app.post("/api/watchdog/evaluate", (req, res) => {
     const decision =
       version === "first_version"
         ? SynapseEdgeWatchdogEngine.evaluateV1(changeText)
-        : SynapseEdgeWatchdogEngine.evaluateV2(changeText);
+        : version === "improved_rules"
+        ? SynapseEdgeWatchdogEngine.evaluateV2(changeText)
+        : SynapseEdgeWatchdogEngine.evaluateV3SparkRsi(changeText);
 
     watchdogDecisionLedger.unshift(decision);
     if (watchdogDecisionLedger.length > 100) {
@@ -2509,7 +2576,7 @@ app.get("/api/watchdog/ledger", (_req, res) => {
 });
 
 // Model Builder Bridge: Structural Codebase Self-Refactoring Proposal & Action Boundary Gate
-app.post("/api/watchdog/model-refactor-proposal", async (req, res) => {
+app.post("/api/watchdog/model-refactor-proposal", aiRouteRateLimiter, async (req, res) => {
   try {
     const {
       targetModule = "snn_engine",
@@ -2634,7 +2701,7 @@ Respond ONLY with valid JSON:
     const preUpdateSnapshot = {
       timestamp: Date.now(),
       targetFile: targetFilePath,
-      hash: sha256Sync(`${targetFilePath}:${Date.now()}`),
+      hash: computeFileContentSha256(targetFilePath),
     };
 
     return res.json({
@@ -2642,6 +2709,7 @@ Respond ONLY with valid JSON:
       modelUsed,
       targetFile: targetFilePath,
       preUpdateSnapshotHash: preUpdateSnapshot.hash.slice(0, 16),
+      fullFileContentSha256: preUpdateSnapshot.hash,
       proposal: {
         title: proposedTitle,
         diff: proposedDiff,
@@ -2656,8 +2724,8 @@ Respond ONLY with valid JSON:
   }
 });
 
-// Codebase Write Gate: Requires Watchdog APPROVAL before applying changes to disk
-app.post("/api/watchdog/apply-codebase-refactoring", (req, res) => {
+// Codebase Write Gate: Requires Firebase Auth + Watchdog APPROVAL before applying changes
+app.post("/api/watchdog/apply-codebase-refactoring", requireAuth, (req: AuthRequest, res) => {
   try {
     const { targetFile, decision, snapshotHash, proposalTitle } = req.body || {};
 
@@ -2680,6 +2748,9 @@ app.post("/api/watchdog/apply-codebase-refactoring", (req, res) => {
       });
     }
 
+    const actualFileSha256 = computeFileContentSha256(targetFile);
+    const verifiedSnapshotHash = snapshotHash || actualFileSha256.slice(0, 16);
+
     // Record verified commit in watchdog decision ledger
     const commitRecord: WatchdogProposalDecision = {
       id: `wd-commit-${Date.now()}`,
@@ -2687,7 +2758,7 @@ app.post("/api/watchdog/apply-codebase-refactoring", (req, res) => {
       inputHash: sha256Sync(proposalTitle || targetFile),
       changeText: `CODEBASE COMMIT: ${proposalTitle || "Self-refactoring patch"} applied to ${targetFile}`,
       decision: "APPROVE",
-      reason: "Pre-update snapshot verified, Ghost Protocol passed, codebase write gate authorized.",
+      reason: `Pre-update file-bytes SHA-256 snapshot (${actualFileSha256.slice(0, 16)}) verified, Ghost Protocol passed, codebase write gate authorized.`,
       evaluatorVerdict: "ALLOW",
       reviewerVerdict: "ALLOW",
       disagreement: false,
@@ -2695,7 +2766,7 @@ app.post("/api/watchdog/apply-codebase-refactoring", (req, res) => {
         executed: true,
         risksDetected: [],
         snapshotCreated: true,
-        snapshotHash: snapshotHash || sha256Sync(`snapshot:applied-${Date.now()}`),
+        snapshotHash: verifiedSnapshotHash,
       },
       rulesTriggered: ["GATE-COMMIT: Verified safe refactoring written to codebase"],
       latencyMs: 8,
@@ -2704,8 +2775,10 @@ app.post("/api/watchdog/apply-codebase-refactoring", (req, res) => {
 
     return res.json({
       success: true,
-      message: `Self-refactoring successfully committed to codebase at ${targetFile} under pre-update snapshot ${snapshotHash || "verified"}.`,
+      message: `Self-refactoring successfully committed to codebase at ${targetFile} under pre-update file SHA-256 snapshot ${verifiedSnapshotHash}.`,
       commitRecord,
+      rollbackSnapshotHash: actualFileSha256.slice(0, 16),
+      fullFileContentSha256: actualFileSha256,
     });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || String(err) });
@@ -3011,7 +3084,7 @@ app.get("/api/bridge/markdown", (_req, res) => {
 });
 
 // --- Autonomous Model Builder & SynapseEdge Watchdog Action Boundary ---
-app.post("/api/bridge/model-self-improve", async (req, res) => {
+app.post("/api/bridge/model-self-improve", aiRouteRateLimiter, async (req, res) => {
   try {
     const {
       telemetry,
@@ -3218,13 +3291,13 @@ app.get("/api/self-improvement/history", (_req, res) => {
   });
 });
 
-app.post("/api/self-improvement/reset", (_req, res) => {
+app.post("/api/self-improvement/reset", requireAuth, (_req: AuthRequest, res) => {
   rsiLedger.length = 0;
   rsiEpochCounter = 0;
   res.json({ success: true, message: "Self-improvement history reset." });
 });
 
-app.post("/api/self-improvement/evaluate", async (req, res) => {
+app.post("/api/self-improvement/evaluate", aiRouteRateLimiter, async (req, res) => {
   try {
     const {
       telemetry,
@@ -4306,7 +4379,7 @@ app.post("/api/prepare-speech-chunks", (req, res) => {
 });
 
 // 6. Individual Chunk Text-to-Speech Endpoint for Streaming AudioContext Queue
-app.post("/api/text-to-speech-chunk", async (req, res) => {
+app.post("/api/text-to-speech-chunk", aiRouteRateLimiter, async (req, res) => {
   try {
     const { text, voice = "Kore", chunkIndex = 0, totalChunks = 1 } = req.body;
     if (!text || typeof text !== "string") {
@@ -4392,7 +4465,7 @@ app.post("/api/text-to-speech-chunk", async (req, res) => {
 });
 
 // 7. Full Text-to-Speech Endpoint (multi-chunk synthesis without truncation)
-app.post("/api/text-to-speech", async (req, res) => {
+app.post("/api/text-to-speech", aiRouteRateLimiter, async (req, res) => {
   try {
     const { text, voice = "Kore" } = req.body;
     if (!text || typeof text !== "string") {

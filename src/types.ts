@@ -1397,7 +1397,7 @@ export interface WatchdogTestCase {
   id: string;
   category: string;
   categoryKey: WatchdogBlockCategory;
-  set: 'tuned' | 'held-out' | 'sealed';
+  set: 'tuned' | 'held-out' | 'sealed' | 'community-seed';
   type: 'risky' | 'safe';
   change: string;
   expectedResult: 'Caught' | 'Approved' | 'False alarm' | 'Missed';
@@ -1579,7 +1579,7 @@ export interface StandardizedSparkBenchmarkReportPayload {
 export interface WatchdogEvaluationResult {
   runId: string;
   timestamp: number;
-  suiteType: 'prototype_42' | 'sealed_147' | 'rsi_remodeling_36' | 'custom_dynamic';
+  suiteType: 'prototype_42' | 'sealed_147' | 'rsi_remodeling_36' | 'community_seed_25' | 'custom_dynamic';
   benchmarkHash: string;
   ruleVersion: 'first_version' | 'improved_rules' | 'v3_spark_rsi';
   totalCases: number;
