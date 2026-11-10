@@ -11,6 +11,7 @@ export const PRIMARY_GEMINI_MODEL = 'gemini-3.8-flash';
 export const PRO_REASONING_WRAPPER_MODEL = 'gemini-3.1-pro-preview';
 export const GEMINI_SPARK_WRAPPER_MODEL = 'gemini-spark-orchestrator';
 export const FALLBACK_FLASH_LITE_MODEL = 'gemini-3.1-flash-lite';
+export const ARGON_BUILDER_MODEL = 'gemini-4-argon';
 
 export type ReasoningWrapperDomain =
   | 'chat'

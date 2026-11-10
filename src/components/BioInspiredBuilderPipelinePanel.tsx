@@ -153,7 +153,8 @@ export const BioInspiredBuilderPipelinePanel: React.FC<BioInspiredBuilderPipelin
             targetFile: currentPipe.stage1ModelBioProposal.targetFile,
             decision: currentPipe.stage2WatchdogGate.decision,
             snapshotHash: currentPipe.stage2WatchdogGate.preBuildSnapshotHash,
-            proposalTitle: `[Bio-Builder Stage 4] ${currentPipe.stage1ModelBioProposal.title}`,
+            proposalTitle: `[Bio-Builder Stage 4 - gemini-4-argon] ${currentPipe.stage1ModelBioProposal.title}`,
+            builderModel: 'gemini-4-argon',
           }),
         });
         if (resp.ok) {
@@ -271,11 +272,11 @@ export const BioInspiredBuilderPipelinePanel: React.FC<BioInspiredBuilderPipelin
               </span>
               <ArrowRight className="w-3 h-3 text-slate-500" />
               <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
-                4. You The Builder
+                4. Argon Builder (gemini-4-argon)
               </span>
             </div>
             <p className="text-[11px] text-slate-400 font-sans mt-0.5">
-              Model asks <em>&ldquo;How can this work better and remain biologically inspired?&rdquo;</em> &rarr; Watchdog verifies action boundaries &rarr; Spark Agents (3.1-Pro + 3.8-Flash) review &amp; approve &rarr; The Builder compiles it into the live SNN model.
+              Model asks <em>&ldquo;How can this work better and remain biologically inspired?&rdquo;</em> &rarr; Watchdog verifies action boundaries &rarr; Spark Agents review &amp; approve &rarr; <strong>Gemini 4 Argon Final Set Builder</strong> compiles it into the live SNN model.
             </p>
           </div>
         </div>
@@ -527,7 +528,7 @@ export const BioInspiredBuilderPipelinePanel: React.FC<BioInspiredBuilderPipelin
             <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
               <span className="text-[11px] font-bold text-emerald-300 flex items-center gap-1.5">
                 <Hammer className="w-3.5 h-3.5 text-emerald-400" />
-                <span>STAGE 4: THE BUILDER</span>
+                <span>STAGE 4: ARGON BUILDER (gemini-4-argon)</span>
               </span>
               <span
                 className={`text-[10px] px-1.5 py-0.5 rounded font-bold border ${

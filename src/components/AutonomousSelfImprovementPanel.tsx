@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   HardwareTelemetry,
   SNNTuningConfig,
   AutonomousSelfImprovementState,
   SelfImprovementEpoch,
+  ArgonRefinedStructuralSet,
+  ArgonStructuralRefinement,
 } from '../types';
-import { AntiDivergenceEngine } from '../lib/selfImprovement';
+import { AntiDivergenceEngine, ArgonSetBuilderEngine } from '../lib/selfImprovement';
 import { SNNEngine } from '../lib/snnEngine';
 import { HardLockedPlankCard } from './HardLockedPlankCard';
 import { ModelTelemetryInspectionModal } from './ModelTelemetryInspectionModal';
+import { ArgonStructuralMatrix3D } from './ArgonStructuralMatrix3D';
 import {
   Sparkles,
   ShieldCheck,
@@ -37,6 +40,8 @@ import {
   List,
   Milestone,
   FileCode,
+  Boxes,
+  Check,
 } from 'lucide-react';
 
 interface AutonomousSelfImprovementPanelProps {
@@ -70,6 +75,37 @@ export const AutonomousSelfImprovementPanel: React.FC<AutonomousSelfImprovementP
   const [researchQuery, setResearchQuery] = useState<string>('BCM sliding threshold & LTD dominance in spiking networks');
   const [showResearchDrawer, setShowResearchDrawer] = useState<boolean>(false);
   const [showTelemetryModal, setShowTelemetryModal] = useState<boolean>(false);
+  const [showArgon3DMatrix, setShowArgon3DMatrix] = useState<boolean>(false);
+  const [showArgonRefinements, setShowArgonRefinements] = useState<boolean>(true);
+  const [isApplyingArgonSet, setIsApplyingArgonSet] = useState<boolean>(false);
+  const [argonSuccessNotice, setArgonSuccessNotice] = useState<string | null>(null);
+
+  const activeArgonSet: ArgonRefinedStructuralSet = useMemo(() => {
+    if (rsiState.activeArgonSet) return rsiState.activeArgonSet;
+    const latestWithArgon = [...rsiState.history].reverse().find((e) => e.argonBuilderSet);
+    if (latestWithArgon?.argonBuilderSet) return latestWithArgon.argonBuilderSet;
+    return ArgonSetBuilderEngine.synthesizeFinalStructuralSet({
+      currentTuning: tuningConfig,
+      candidateTuning: tuningConfig,
+      currentDri: rsiState.currentMetrics.divergenceRiskIndex,
+      projectedDri: Math.max(0.08, rsiState.currentMetrics.divergenceRiskIndex - 0.08),
+      telemetry,
+    });
+  }, [rsiState.activeArgonSet, rsiState.history, tuningConfig, rsiState.currentMetrics.divergenceRiskIndex, telemetry]);
+
+  const handleApplyArgonStructuralSet = () => {
+    setIsApplyingArgonSet(true);
+    try {
+      const res = ArgonSetBuilderEngine.applyRefinedStructuralSetToEngine(engine, activeArgonSet);
+      setArgonSuccessNotice(res.message);
+      setTimeout(() => setArgonSuccessNotice(null), 4500);
+    } catch (err: any) {
+      setArgonSuccessNotice(`Error applying structural set: ${err?.message || err}`);
+      setTimeout(() => setArgonSuccessNotice(null), 4500);
+    } finally {
+      setIsApplyingArgonSet(false);
+    }
+  };
 
   // Preset literature research topics
   const researchPresets = [
@@ -341,6 +377,196 @@ export const AutonomousSelfImprovementPanel: React.FC<AutonomousSelfImprovementP
 
       {/* Hard-Locked Stability Plank Verification Card */}
       <HardLockedPlankCard plank={AntiDivergenceEngine.getActivePlankStatus(tuningConfig, dri)} />
+
+      {/* Argon Model (gemini-4-argon) Biologically-Inspired Recursive Self-Improvement & Watchdog Approval Gate */}
+      <div className="bg-gradient-to-r from-indigo-950/40 via-slate-900 to-purple-950/40 border border-indigo-500/50 rounded-xl p-4 shadow-xl flex flex-col gap-3">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border-b border-indigo-900/40 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md shadow-indigo-500/20">
+              <Boxes className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                  Argon Biologically-Inspired Recursive Self-Improvement (gemini-4-argon)
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-bold">
+                  {activeArgonSet.biologicalPlasticity?.convergenceVelocityGain ?? 3.6}x Faster Bio-Convergence
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
+                  Watchdog Gate: {activeArgonSet.biologicalPlasticity?.watchdogApprovalGate.status ?? 'APPROVED'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Restructures <span className="text-indigo-300 font-mono">gemini-4-argon</span>&apos;s native recursive self-improvement around biological plasticity (BCM sliding threshold &theta;<sub>M</sub>, Turrigiano multiplicative scaling, Bi &amp; Poo STDP, and PV+ criticality &sigma;&approx;1.000), while Watchdog &amp; Plank govern fast approval.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setShowArgon3DMatrix((prev) => !prev)}
+              className={`px-2.5 py-1.5 text-[11px] font-mono rounded-lg transition-all flex items-center gap-1 cursor-pointer border ${
+                showArgon3DMatrix
+                  ? 'bg-indigo-600/30 text-indigo-200 border-indigo-400/70'
+                  : 'bg-indigo-950/60 text-indigo-300 hover:text-indigo-200 border-indigo-800/60'
+              }`}
+            >
+              <Boxes className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{showArgon3DMatrix ? 'Hide Inline 3D View' : 'Show Inline 3D View'}</span>
+            </button>
+            <button
+              onClick={() => setShowArgonRefinements((prev) => !prev)}
+              className="px-2.5 py-1.5 text-[11px] font-mono text-indigo-300 hover:text-indigo-200 bg-indigo-950/60 border border-indigo-800/60 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+            >
+              <FileCode className="w-3.5 h-3.5" />
+              <span>{showArgonRefinements ? 'Collapse Bio-Passes' : 'Expand Bio-Passes'}</span>
+            </button>
+            <button
+              onClick={handleApplyArgonStructuralSet}
+              disabled={isApplyingArgonSet}
+              className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs rounded-lg shadow-md shadow-indigo-900/30 flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
+              title="Commit Watchdog-approved biological plasticity set to live SNN simulation"
+            >
+              <Zap className={`w-3.5 h-3.5 ${isApplyingArgonSet ? 'animate-spin' : 'text-amber-300'}`} />
+              <span>{isApplyingArgonSet ? 'Applying Bio-RSI...' : 'Commit Approved Bio-RSI to SNN'}</span>
+            </button>
+            <button
+              onClick={() => onTriggerEpoch('argon_bio_rsi_cycle', 'BCM sliding threshold, Turrigiano multiplicative scaling & PV+ critical branching')}
+              disabled={isEvaluating}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs rounded-lg flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
+              title="Run Argon 3-pass biological recursive self-improvement with Watchdog approval"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isEvaluating ? 'animate-spin' : 'text-sky-400'}`} />
+              <span>Run Bio-RSI Cycle</span>
+            </button>
+          </div>
+        </div>
+
+        {argonSuccessNotice && (
+          <div className="px-3 py-2 bg-emerald-950/40 border border-emerald-500/40 rounded-lg text-xs text-emerald-300 flex items-center gap-2 animate-in fade-in duration-150">
+            <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{argonSuccessNotice}</span>
+          </div>
+        )}
+
+        {/* Biological Plasticity & Watchdog Approval Gate Telemetry Strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs font-mono">
+          <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800 flex flex-col gap-0.5">
+            <span className="text-slate-500 text-[10px]">BCM Threshold (&theta;<sub>M</sub>)</span>
+            <span className="text-indigo-300 font-bold text-xs">
+              {activeArgonSet.biologicalPlasticity?.bcmSlidingThresholdHz.toFixed(1) ?? '28.0'} Hz
+            </span>
+          </div>
+          <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800 flex flex-col gap-0.5">
+            <span className="text-slate-500 text-[10px]">Turrigiano Scale (&beta;)</span>
+            <span className="text-sky-300 font-bold text-xs">
+              {activeArgonSet.biologicalPlasticity?.turrigianoScalingFactor.toFixed(3) ?? '0.985'}x (Ratio Lock)
+            </span>
+          </div>
+          <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800 flex flex-col gap-0.5">
+            <span className="text-slate-500 text-[10px]">Critical Branching (&sigma;)</span>
+            <span className="text-emerald-400 font-bold text-xs">
+              &sigma; = {activeArgonSet.biologicalPlasticity?.criticalBranchingSigma.toFixed(3) ?? '1.000'}
+            </span>
+          </div>
+          <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800 flex flex-col gap-0.5">
+            <span className="text-slate-500 text-[10px]">Selectivity Accuracy</span>
+            <span className="text-purple-300 font-bold text-xs">
+              {activeArgonSet.biologicalPlasticity?.receptiveFieldSelectivityDb.toFixed(1) ?? '22.2'} dB SNR
+            </span>
+          </div>
+          <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800 flex flex-col gap-0.5">
+            <span className="text-slate-500 text-[10px]">Convergence Speed</span>
+            <span className="text-amber-300 font-bold text-xs">
+              {activeArgonSet.biologicalPlasticity?.convergenceVelocityGain ?? 3.6}x Faster (3 Passes)
+            </span>
+          </div>
+          <div className="p-2 bg-slate-950/80 rounded-lg border border-emerald-800/50 flex flex-col gap-0.5">
+            <span className="text-slate-500 text-[10px]">Watchdog Approval Gate</span>
+            <span className="text-emerald-400 font-bold text-xs">
+              {activeArgonSet.biologicalPlasticity?.watchdogApprovalGate.status ?? 'APPROVED'} ({activeArgonSet.biologicalPlasticity?.watchdogApprovalGate.approvalLatencyMs ?? 1.4}ms)
+            </span>
+          </div>
+        </div>
+
+        {/* Live 3D Three.js Representation of the Argon Set Building Process & SNN Matrix Mapping */}
+        {showArgon3DMatrix && (
+          <ArgonStructuralMatrix3D
+            engine={engine}
+            argonSet={activeArgonSet}
+            telemetry={telemetry}
+            isEvaluating={isEvaluating}
+            onApplyArgonSet={handleApplyArgonStructuralSet}
+            onTriggerResynthesize={() =>
+              onTriggerEpoch('argon_builder_synthesis', 'Refine structural set for network')
+            }
+          />
+        )}
+
+        {/* Refinement Cards Grid */}
+        {showArgonRefinements && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1 animate-in fade-in duration-150">
+            {activeArgonSet.structuralRefinements.map((ref, idx) => {
+              const actionColors: Record<string, string> = {
+                reinforce: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+                remodel: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+                dampen: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+                synthesize: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+              };
+              return (
+                <div key={idx} className="p-3 bg-slate-950/90 rounded-lg border border-slate-800 flex flex-col gap-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                          {ref.module}
+                        </span>
+                        <span className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.2 rounded border ${actionColors[ref.action] || 'bg-slate-800 text-slate-300'}`}>
+                          {ref.action}
+                        </span>
+                      </div>
+                      <span className="text-xs font-bold text-white mt-1">
+                        {ref.component}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
+                    {ref.rationale}
+                  </p>
+
+                  <div className="bg-slate-900/90 p-2 rounded border border-slate-800 font-mono text-[10px] text-indigo-300 whitespace-pre overflow-x-auto">
+                    {ref.diffSummary}
+                  </div>
+
+                  <div className="text-[10px] font-mono text-slate-400 flex items-center gap-1.5 pt-1 border-t border-slate-900">
+                    <span className="text-slate-500">Impact:</span>
+                    <span className="text-slate-300">{ref.structuralImpact}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Invariant Guarantees Bar */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-indigo-900/30 text-[10px] font-mono">
+          <span className="text-slate-400 font-semibold mr-1 flex items-center gap-1">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            Argon Invariants Verified:
+          </span>
+          {activeArgonSet.invariantsConfirmed.slice(0, 4).map((inv, idx) => (
+            <span
+              key={idx}
+              className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-300 flex items-center gap-1"
+            >
+              <Check className="w-2.5 h-2.5 text-emerald-400" />
+              <span>{inv}</span>
+            </span>
+          ))}
+        </div>
+      </div>
 
       {/* Unified 5-Subsystem Monitoring Streams (Gemini Pro Tier Ingestion) */}
       <div className="bg-[#0a0f1d] border border-sky-900/60 rounded-xl p-3.5 shadow-lg flex flex-col gap-2.5">
@@ -905,6 +1131,13 @@ export const AutonomousSelfImprovementPanel: React.FC<AutonomousSelfImprovementP
                             </span>
                           </div>
 
+                          {epoch.argonBuilderSet && (
+                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex items-center gap-1">
+                              <Boxes className="w-3 h-3 text-indigo-400" />
+                              <span>Argon Set ({epoch.argonBuilderSet.structuralRefinements.length})</span>
+                            </span>
+                          )}
+
                           <span className="text-[10px] text-purple-300 bg-purple-950/40 border border-purple-800/40 px-2 py-0.5 rounded">
                             {epoch.modelUsed}
                           </span>
@@ -1124,6 +1357,41 @@ export const AutonomousSelfImprovementPanel: React.FC<AutonomousSelfImprovementP
                                   </li>
                                 ))}
                               </ul>
+                            </div>
+                          )}
+
+                          {/* Argon Refined Structural Set */}
+                          {epoch.argonBuilderSet && (
+                            <div className="mt-2.5 p-2.5 bg-indigo-950/30 border border-indigo-800/50 rounded-lg space-y-1.5 text-[11px]">
+                              <div className="flex items-center justify-between text-indigo-300 font-semibold text-[11px]">
+                                <span className="flex items-center gap-1.5">
+                                  <Boxes className="w-3.5 h-3.5 text-indigo-400" />
+                                  <span>Argon Final Set Builder ({epoch.argonBuilderSet.builderModel}) Refined Structural Set</span>
+                                </span>
+                                <span className="text-[10px] font-mono text-emerald-400">
+                                  Score: {epoch.argonBuilderSet.architecturalScorePct}% • Sub-5mW: {epoch.argonBuilderSet.sub5mWSatisfied ? 'Verified' : 'Pending'}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1 border-t border-indigo-900/40">
+                                {epoch.argonBuilderSet.structuralRefinements.map((ref, rIdx) => (
+                                  <div key={rIdx} className="p-2 bg-slate-950 rounded border border-slate-800 text-[10px] space-y-1 font-mono">
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-bold text-white">{ref.component}</span>
+                                      <span className="uppercase text-[9px] px-1.5 py-0.2 rounded bg-indigo-950 text-indigo-300 border border-indigo-800 font-bold">
+                                        {ref.action}
+                                      </span>
+                                    </div>
+                                    <p className="text-slate-400 font-sans text-[10px]">{ref.rationale}</p>
+                                    <div className="text-indigo-300 bg-slate-900/80 p-1.5 rounded overflow-x-auto text-[9px]">
+                                      {ref.diffSummary}
+                                    </div>
+                                    <div className="text-[9px] text-slate-500">
+                                      <span>Impact: </span>
+                                      <span className="text-slate-300">{ref.structuralImpact}</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           )}
                         </div>

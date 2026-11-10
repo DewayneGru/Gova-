@@ -546,6 +546,50 @@ export interface SelfImprovementEpoch {
   hardLockedPlankVerified?: boolean;
   shadowValidation?: ShadowTrialResult;
   watchdogDecision?: WatchdogProposalDecision;
+  argonBuilderSet?: ArgonRefinedStructuralSet;
+}
+
+export interface ArgonStructuralRefinement {
+  module: 'snn_engine' | 'drift_guard' | 'substrate' | 'self_improvement';
+  component: string;
+  action: 'synthesize' | 'remodel' | 'dampen' | 'reinforce';
+  rationale: string;
+  diffSummary: string;
+  structuralImpact: string;
+}
+
+export interface ArgonBiologicalPlasticityMetrics {
+  bcmSlidingThresholdHz: number;
+  turrigianoScalingFactor: number;
+  parvalbuminShuntConductance: number;
+  criticalBranchingSigma: number;
+  stdpAsymmetryRatio: number;
+  convergenceVelocityGain: number;
+  receptiveFieldSelectivityDb: number;
+  recursivePassesCompleted: number;
+  synapsesRemodeledCount: number;
+  watchdogApprovalGate: {
+    status: 'APPROVED' | 'ESCALATED' | 'BLOCKED';
+    ruleVersion: string;
+    confidencePct: number;
+    approvalLatencyMs: number;
+    summary: string;
+  };
+}
+
+export interface ArgonRefinedStructuralSet {
+  builderModel: string;
+  builderIdentity: string;
+  timestamp: number;
+  compilationStatus: 'compiled_verified' | 'simulated_shadow' | 'committed';
+  targetBranch: string;
+  structuralRefinements: ArgonStructuralRefinement[];
+  hyperparameterSet: SNNTuningConfig;
+  invariantsConfirmed: string[];
+  powerBudgetTargetMw: number;
+  sub5mWSatisfied: boolean;
+  architecturalScorePct: number;
+  biologicalPlasticity?: ArgonBiologicalPlasticityMetrics;
 }
 
 export interface AutonomousSelfImprovementState {
@@ -563,6 +607,7 @@ export interface AutonomousSelfImprovementState {
   hardLockedPlank?: HardLockedPlankInvariants;
   homeostaticScalingActive?: boolean;
   lastShadowTrial?: ShadowTrialResult;
+  activeArgonSet?: ArgonRefinedStructuralSet;
 }
 
 export interface UnifiedTelemetrySnapshot {

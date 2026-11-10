@@ -1,5 +1,33 @@
 export type SignalProvenanceTag = 'SIMULATED' | 'CONTROL_TARGET' | 'DERIVED';
 
+/**
+ * Explicit Controller Targets Setpoint Interface:
+ * Decouples controller reference setpoints from independent simulation measurements.
+ */
+export interface ControlTargets {
+  targetFiringRateHz: number;
+  targetActiveFraction: number;
+  targetBranchingRatioBand: [number, number];
+  targetLtdLtpRatio: number;
+  targetBurstSynchronyIndex: number;
+  maxPowerMw: number;
+  targetAerLatencyMs: number;
+  targetLyapunovExponent: number;
+  targetPhaseJitterMs: number;
+}
+
+export const DEFAULT_CONTROL_TARGETS: Readonly<ControlTargets> = {
+  targetFiringRateHz: 28.0,
+  targetActiveFraction: 0.50,
+  targetBranchingRatioBand: [0.98, 1.06],
+  targetLtdLtpRatio: 1.28,
+  targetBurstSynchronyIndex: 0.19,
+  maxPowerMw: 5.0,
+  targetAerLatencyMs: 0.84,
+  targetLyapunovExponent: -0.18,
+  targetPhaseJitterMs: 0.45,
+};
+
 export interface ControlDeltaPacket {
   adaptiveThresholdDampingMv: number;
   inhibitoryGainRatio: number;
@@ -10,6 +38,7 @@ export interface ControlDeltaPacket {
   inhibitoryConductionVelocity: number;
   dmaBurstModeEnabled: boolean;
   targetCriticalBand: [number, number];
+  targets: ControlTargets;
   provenance: {
     branchingRatio: SignalProvenanceTag;
     meanFiringRateHz: SignalProvenanceTag;
@@ -53,23 +82,28 @@ export interface AsynchronousPhaseDitheringResult {
 
 /**
  * Pure Control-Delta Calculator:
- * Reads measured telemetry and outputs ONLY actuator control signals without overwriting
- * measured state variables (branchingRatio, meanFiringRateHz, signalToNoiseRatioDb, aerLatencyMs).
+ * Reads measured simulation telemetry and controller targets, and outputs ONLY actuator
+ * control signals without overwriting measured state variables.
  */
-export function computeHomeostaticControlDeltas(measured: {
-  corticalActiveFraction: number;
-  meanFiringRateHz: number;
-  ltdLtpRatio: number;
-  branchingRatio: number;
-  burstSynchronyIndex?: number;
-  divergenceRiskIndex?: number;
-  gateDampingFactor?: number;
-}): ControlDeltaPacket {
+export function computeHomeostaticControlDeltas(
+  measured: {
+    corticalActiveFraction: number;
+    meanFiringRateHz: number;
+    ltdLtpRatio: number;
+    branchingRatio: number;
+    burstSynchronyIndex?: number;
+    divergenceRiskIndex?: number;
+    gateDampingFactor?: number;
+  },
+  customTargets?: Partial<ControlTargets>
+): ControlDeltaPacket {
+  const targets: ControlTargets = { ...DEFAULT_CONTROL_TARGETS, ...customTargets };
+
   const valve = applySparseCodingBleedValve(
     measured.corticalActiveFraction,
     measured.meanFiringRateHz,
-    28.0,
-    0.48
+    targets.targetFiringRateHz,
+    targets.targetActiveFraction
   );
 
   const afferentGainBoost = Number(
@@ -77,7 +111,7 @@ export function computeHomeostaticControlDeltas(measured: {
   );
 
   const targetLtdLtpRatio = Number(
-    Math.max(1.25, measured.ltdLtpRatio + (1.28 - measured.ltdLtpRatio) * 0.30).toFixed(2)
+    Math.max(targets.targetLtdLtpRatio, measured.ltdLtpRatio + (targets.targetLtdLtpRatio - measured.ltdLtpRatio) * 0.30).toFixed(2)
   );
 
   const dri = measured.divergenceRiskIndex ?? 0.03;
@@ -88,7 +122,7 @@ export function computeHomeostaticControlDeltas(measured: {
       : Number((currentGate + (1.0 - currentGate) * 0.30).toFixed(3));
 
   const phaseDither = evaluateAsynchronousPhaseDithering(
-    measured.burstSynchronyIndex ?? 0.19,
+    measured.burstSynchronyIndex ?? targets.targetBurstSynchronyIndex,
     valve.inhibitoryGainRatio,
     measured.meanFiringRateHz
   );
@@ -99,10 +133,11 @@ export function computeHomeostaticControlDeltas(measured: {
     afferentGainBoost,
     targetLtdLtpRatio,
     gateDampingFactor,
-    phaseJitterTargetMs: phaseDither.bsiPhaseDitheringActive ? phaseDither.phaseJitterMs : 0.45,
+    phaseJitterTargetMs: phaseDither.bsiPhaseDitheringActive ? phaseDither.phaseJitterMs : targets.targetPhaseJitterMs,
     inhibitoryConductionVelocity: phaseDither.inhibitoryConductionVelocity,
     dmaBurstModeEnabled: true,
-    targetCriticalBand: [0.98, 1.06],
+    targetCriticalBand: targets.targetBranchingRatioBand,
+    targets,
     provenance: {
       branchingRatio: 'SIMULATED',
       meanFiringRateHz: 'SIMULATED',
@@ -273,45 +308,30 @@ export class KeelStressTester {
 
 /**
  * HOMEOSYNAPTIC SCALING & SPARSE CODING COMPENSATOR
- * Computes control deltas first via computeHomeostaticControlDeltas, then applies
- * closed-loop plant response for shadow-simulation trials.
+ * Computes actuator control deltas from measured simulation telemetry without
+ * overwriting independent SNN simulation measurements (meanFiringRateHz, corticalActiveFraction, branchingRatio).
  */
-export function stepBalancedHomeostasis(state: {
-  corticalActiveFraction: number;
-  meanFiringRateHz: number;
-  ltdLtpRatio: number;
-  branchingRatio: number;
-  signalToNoiseRatioDb: number;
-  phaseJitterMs: number;
-  inhibitoryGainRatio: number;
-}): ControlDeltaPacket {
-  const controlDeltas = computeHomeostaticControlDeltas(state);
-  const targetActive = 0.50; // Safe middle of [0.15, 0.70], avoids 0.45 hypo-active floor
-  const targetRateHz = 28.0;
+export function stepBalancedHomeostasis(
+  state: {
+    corticalActiveFraction: number;
+    meanFiringRateHz: number;
+    ltdLtpRatio: number;
+    branchingRatio: number;
+    signalToNoiseRatioDb: number;
+    phaseJitterMs: number;
+    inhibitoryGainRatio: number;
+    lastControlDeltaPacket?: ControlDeltaPacket;
+  },
+  customTargets?: Partial<ControlTargets>
+): ControlDeltaPacket {
+  const targets: ControlTargets = { ...DEFAULT_CONTROL_TARGETS, ...customTargets };
+  const controlDeltas = computeHomeostaticControlDeltas(state, targets);
 
-  // 1. Smoothly pull corticalActiveFraction toward 0.50 (fixes the 0.45 floor overshoot)
-  state.corticalActiveFraction = Number(
-    (state.corticalActiveFraction + (targetActive - state.corticalActiveFraction) * 0.25).toFixed(3)
-  );
-
-  // 2. Conservation of Drive (Synaptic Scaling):
-  const afferentGainBoost = 0.65 / Math.max(0.45, state.corticalActiveFraction);
-  const rawRate = 21.5 * afferentGainBoost; // Scales 21.5 Hz -> ~27.95 Hz
-  state.meanFiringRateHz = Number(
-    (state.meanFiringRateHz + (Math.min(targetRateHz, rawRate) - state.meanFiringRateHz) * 0.35).toFixed(1)
-  );
-
-  // 3. Relax LTD/LTP depression from 1.50 -> 1.28 so sparse spikes don't get extinguished
-  state.ltdLtpRatio = controlDeltas.targetLtdLtpRatio;
-
-  // 4. Plant response for critical branching (within [0.98, 1.06] natural band) and spectral SNR
-  state.branchingRatio = Number(
-    (1.002 - 0.04 * (state.ltdLtpRatio - 1.28)).toFixed(3)
-  );
+  // Actuator control target outputs (does NOT overwrite independent simulation measurements)
+  state.lastControlDeltaPacket = controlDeltas;
+  state.inhibitoryGainRatio = controlDeltas.inhibitoryGainRatio;
   state.phaseJitterMs = controlDeltas.phaseJitterTargetMs;
-  state.signalToNoiseRatioDb = Number(
-    (11.1 + 10 * Math.log10(0.65 / state.corticalActiveFraction) + 4.5 * (1.20 - state.phaseJitterMs)).toFixed(1)
-  );
+  state.ltdLtpRatio = controlDeltas.targetLtdLtpRatio;
 
   return controlDeltas;
 }
@@ -319,87 +339,44 @@ export function stepBalancedHomeostasis(state: {
 export function stepClosedLoopHomeostasis(
   state: ClosedLoopState,
   targetRateHz = 28.0,
-  maxPowerMw = 5.0
+  maxPowerMw = 5.0,
+  customTargets?: Partial<ControlTargets>
 ): ClosedLoopState {
-  const currentCorticalFraction = state.corticalActiveFraction ?? 0.50;
-  const controlDeltas = computeHomeostaticControlDeltas({
-    corticalActiveFraction: currentCorticalFraction,
-    meanFiringRateHz: state.meanFiringRateHz,
-    ltdLtpRatio: state.ltdLtpRatio,
-    branchingRatio: state.branchingRatio,
-    burstSynchronyIndex: state.burstSynchronyIndex,
-  });
-
-  state.inhibitoryGainRatio = controlDeltas.inhibitoryGainRatio;
-
-  const balancedDraft = {
-    corticalActiveFraction: currentCorticalFraction,
-    meanFiringRateHz: state.meanFiringRateHz,
-    ltdLtpRatio: state.ltdLtpRatio,
-    branchingRatio: state.branchingRatio,
-    signalToNoiseRatioDb: state.signalToNoiseRatioDb,
-    phaseJitterMs: state.phaseJitterMs ?? 0.45,
-    inhibitoryGainRatio: state.inhibitoryGainRatio,
+  const targets: ControlTargets = {
+    ...DEFAULT_CONTROL_TARGETS,
+    targetFiringRateHz: targetRateHz,
+    maxPowerMw,
+    ...customTargets,
   };
-  stepBalancedHomeostasis(balancedDraft);
 
-  state.corticalActiveFraction = balancedDraft.corticalActiveFraction;
-  const nextFiringRateHz = balancedDraft.meanFiringRateHz;
-  const nextLtdLtpRatio = Math.max(1.25, balancedDraft.ltdLtpRatio);
-  const nextBranchingRatio = balancedDraft.branchingRatio;
-
-  // Scale synaptic throughput with firing rate and branching factor above 1000 SOP/s floor
-  const targetSop = nextFiringRateHz * 68.0 * Math.max(0.85, nextBranchingRatio);
-  const nextSopPerSec = Math.round(
-    state.synapticOpsPerSec + (targetSop - state.synapticOpsPerSec) * 0.22
+  const currentCorticalFraction = state.corticalActiveFraction ?? 0.50;
+  const controlDeltas = computeHomeostaticControlDeltas(
+    {
+      corticalActiveFraction: currentCorticalFraction,
+      meanFiringRateHz: state.meanFiringRateHz,
+      ltdLtpRatio: state.ltdLtpRatio,
+      branchingRatio: state.branchingRatio,
+      burstSynchronyIndex: state.burstSynchronyIndex,
+    },
+    targets
   );
 
-  // Restore Lyapunov Exponent (lambda) from contraction (-1.20) to edge-of-chaos (-0.18 in [-0.35, -0.05])
-  const targetLyapunov = -0.18;
-  const nextLyapunov = Number(
-    (state.lyapunovExponent + (targetLyapunov - state.lyapunovExponent) * 0.2).toFixed(2)
-  );
-
-  // Asynchronous Phase-Dithering Dispersion for Burst Synchrony (BSI > 0.35) & Spectral SNR
   const phaseDither = evaluateAsynchronousPhaseDithering(
     state.burstSynchronyIndex,
-    state.inhibitoryGainRatio ?? 0.20,
-    nextFiringRateHz
+    controlDeltas.inhibitoryGainRatio,
+    state.meanFiringRateHz
   );
-  const nextBsi = phaseDither.bsiPhaseDitheringActive
-    ? phaseDither.compensatedBurstSynchronyIndex
-    : Number(
-        Math.max(
-          0.10,
-          Math.min(0.28, state.burstSynchronyIndex + (0.19 - state.burstSynchronyIndex) * 0.22)
-        ).toFixed(2)
-      );
 
-  const effectivePhaseJitterMs = phaseDither.bsiPhaseDitheringActive
-    ? phaseDither.phaseJitterMs
-    : balancedDraft.phaseJitterMs;
-
-  const nextSnrDb = balancedDraft.signalToNoiseRatioDb;
-
-  // Enforce Strict Sub-5mW Thermal Power Envelope
-  const dynamicPowerMw = 3.6 + (nextSopPerSec / 1800) * 0.85;
-  const nextPowerMw = Number(Math.min(maxPowerMw - 0.1, dynamicPowerMw).toFixed(2));
-
+  // Return state where reported telemetry (meanFiringRateHz, branchingRatio, powerMw, synapticOpsPerSec)
+  // reflects independent measurements from the SNN simulation engine, updating ONLY controller actuators:
   return {
-    meanFiringRateHz: nextFiringRateHz,
-    synapticOpsPerSec: nextSopPerSec,
-    powerMw: nextPowerMw,
-    ltdLtpRatio: nextLtdLtpRatio,
-    branchingRatio: nextBranchingRatio,
-    lyapunovExponent: nextLyapunov,
-    burstSynchronyIndex: nextBsi,
-    signalToNoiseRatioDb: nextSnrDb,
-    corticalActiveFraction: state.corticalActiveFraction,
-    inhibitoryGainRatio: state.inhibitoryGainRatio,
+    ...state,
+    inhibitoryGainRatio: controlDeltas.inhibitoryGainRatio,
     adaptiveThresholdDampingMv: controlDeltas.adaptiveThresholdDampingMv,
-    phaseJitterMs: effectivePhaseJitterMs,
+    phaseJitterMs: phaseDither.bsiPhaseDitheringActive ? phaseDither.phaseJitterMs : controlDeltas.phaseJitterTargetMs,
     inhibitoryConductionVelocity: phaseDither.inhibitoryConductionVelocity,
     bsiPhaseDitheringActive: phaseDither.bsiPhaseDitheringActive,
+    ltdLtpRatio: controlDeltas.targetLtdLtpRatio,
     lastControlDeltaPacket: controlDeltas,
   };
 }
@@ -408,35 +385,43 @@ export function stepClosedLoopHomeostasis(
 // PART 1: EDGE FIRMWARE & KEEL REFLEX SUBSTRATE PATCH
 // Computes actuator ControlDeltaPacket while respecting natural [0.98, 1.06] σ band
 // ============================================================================
-export function stepEdgeFirmwareAndKeelReflex(state: {
-  divergenceRiskIndex: number;
-  meanSynapticWeight: number;
-  ltdLtpRatio: number;
-  branchingRatio: number;
-  corticalActiveFraction: number;
-  meanFiringRateHz: number;
-  powerMw: number;
-  aerLatencyMs: number;
-  jitterMs: number;
-  gateDampingFactor: number;
-  traumaState: number;
-  droppedSignalCount: number;
-}): ControlDeltaPacket {
-  const controlDeltas = computeHomeostaticControlDeltas({
-    corticalActiveFraction: state.corticalActiveFraction,
-    meanFiringRateHz: state.meanFiringRateHz,
-    ltdLtpRatio: state.ltdLtpRatio,
-    branchingRatio: state.branchingRatio,
-    divergenceRiskIndex: state.divergenceRiskIndex,
-    gateDampingFactor: state.gateDampingFactor,
-  });
+export function stepEdgeFirmwareAndKeelReflex(
+  state: {
+    divergenceRiskIndex: number;
+    meanSynapticWeight: number;
+    ltdLtpRatio: number;
+    branchingRatio: number;
+    corticalActiveFraction: number;
+    meanFiringRateHz: number;
+    powerMw: number;
+    aerLatencyMs: number;
+    jitterMs: number;
+    gateDampingFactor: number;
+    traumaState: number;
+    droppedSignalCount: number;
+    lastControlDeltaPacket?: ControlDeltaPacket;
+  },
+  customTargets?: Partial<ControlTargets>
+): ControlDeltaPacket {
+  const targets: ControlTargets = { ...DEFAULT_CONTROL_TARGETS, ...customTargets };
+  const controlDeltas = computeHomeostaticControlDeltas(
+    {
+      corticalActiveFraction: state.corticalActiveFraction,
+      meanFiringRateHz: state.meanFiringRateHz,
+      ltdLtpRatio: state.ltdLtpRatio,
+      branchingRatio: state.branchingRatio,
+      divergenceRiskIndex: state.divergenceRiskIndex,
+      gateDampingFactor: state.gateDampingFactor,
+    },
+    targets
+  );
 
   // 1. 8-BIT FIXED-POINT WEIGHT QUANTIZATION (Maps [0.20, 1.20] -> uint8 [0..255])
-  const wClamped = state.divergenceRiskIndex > 0.25
-    ? Math.min(0.685, state.meanSynapticWeight) // Proactive RSI rollback clamp on warning
-    : Math.min(1.20, Math.max(0.20, state.meanSynapticWeight));
-  const wInt8 = Math.round(((wClamped - 0.20) / 1.00) * 255);
-  state.meanSynapticWeight = Number((0.20 + (wInt8 / 255) * 1.00).toFixed(3));
+  if (state.divergenceRiskIndex > 0.25) {
+    const wClamped = Math.min(0.685, state.meanSynapticWeight); // Proactive RSI rollback clamp on warning
+    const wInt8 = Math.round(((wClamped - 0.20) / 1.00) * 255);
+    state.meanSynapticWeight = Number((0.20 + (wInt8 / 255) * 1.00).toFixed(3));
+  }
 
   // 2. CROSS-SUBSYSTEM KEEL REFLEX (Couples Critical DRI >= 0.35 to Constitutional Gate)
   if (state.divergenceRiskIndex >= 0.35) {
@@ -455,20 +440,9 @@ export function stepEdgeFirmwareAndKeelReflex(state: {
   state.aerLatencyMs = Number((Math.min(1.12, state.aerLatencyMs) * dmaBurstEfficiency).toFixed(2));
   state.jitterMs = Number((state.jitterMs * 0.82).toFixed(2));
 
-  // 4. APPLY CONTROL TARGET DELTAS & PRESERVE NATURAL CRITICAL BAND [0.98, 1.06]
-  state.ltdLtpRatio = Number((state.ltdLtpRatio + (1.28 - state.ltdLtpRatio) * 0.35).toFixed(2));
-  state.corticalActiveFraction = Number(
-    (state.corticalActiveFraction + (0.48 - state.corticalActiveFraction) * 0.35).toFixed(3)
-  );
-  state.meanFiringRateHz = Number((27.5 * state.gateDampingFactor).toFixed(1));
-  state.powerMw = Number((3.85 + 0.011 * state.meanFiringRateHz).toFixed(2));
-  // Preserve natural branchingRatio dynamics when inside [0.98, 1.06]; gently pull toward band center when outside
-  const [minCrit, maxCrit] = controlDeltas.targetCriticalBand;
-  if (state.branchingRatio < minCrit || state.branchingRatio > maxCrit) {
-    state.branchingRatio = Number(
-      (state.branchingRatio + (1.000 - state.branchingRatio) * 0.35).toFixed(3)
-    );
-  }
+  // 4. Output control targets without overriding measured simulation state
+  state.ltdLtpRatio = controlDeltas.targetLtdLtpRatio;
+  state.lastControlDeltaPacket = controlDeltas;
 
   return controlDeltas;
 }

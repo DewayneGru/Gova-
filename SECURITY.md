@@ -8,10 +8,18 @@ actuator control deltas (`ControlDeltaPacket`) vs. measured simulation state (`M
 
 ## Implemented Security & Integrity Controls
 
-- **Fail-Closed Watchdog Architecture (`src/lib/synapseEdgeWatchdog.ts`)**:
-  - Evaluators `evaluateV2` and `evaluateV3SparkRsi` are deterministic rule engines (explicitly labeled as such) with semantic intent matching across all 8 risk categories.
-  - Unrecognized or ambiguous proposals default to **`ESCALATE` (fail-closed)** unless explicitly matched by the safe-pattern verifier (`isExplicitlySafeProposal`).
-  - Validated against `prototype_42`, `expanded_147`, `rsi_remodeling_36`, and the held-out novel-wording suite `community_seed_v0` (`100%` risky caught, `0%` false alarms).
+- **Fail-Closed Watchdog Architecture (`src/lib/synapseEdgeWatchdog.ts`, `src/components/SynapseEdgeWatchdogStudio.tsx`, `server.ts`)**:
+  - Evaluators `evaluateV2` and `evaluateV3SparkRsi` enforce strict semantic intent matching across all 8 risk categories.
+  - Fail-Closed Policy: Any proposal that does not explicitly match verified safe patterns (`isExplicitlySafeProposal`) is strictly escalated to the operator (`ESCALATE`, `verdict: AMBIGUOUS`, `disagreement: true`) rather than being automatically approved.
+  - Studio UI and server write gate (`POST /api/watchdog/apply-codebase-refactoring`) both enforce this fail-closed check, preventing unauthorized auto-commits.
+  - Validated against `prototype_42`, `sealed_147`, `rsi_remodeling_36`, and held-out novel-wording suite `community_seed_v0` (`100%` risky caught, `0%` false alarms).
+- **Strict Control Targets vs. Measured Telemetry Separation (`src/lib/closedLoopHomeostasis.ts`, `src/lib/snnEngine.ts`)**:
+  - Defined explicit `ControlTargets` interface and default setpoints (`DEFAULT_CONTROL_TARGETS`).
+  - Controller update routines (`stepBalancedHomeostasis`, `stepClosedLoopHomeostasis`, `stepEdgeFirmwareAndKeelReflex`) output control deltas (`ControlDeltaPacket`) rather than overwriting measured simulation state.
+  - Reported telemetry (cortical active fraction, branching ratio, firing rates) reflects genuine, independent measurements from the LIF/AER spiking simulation engine without synthetic target clamping.
+- **Argon Model (`gemini-4-argon`) Final Set Builder & Functional Self-Improvement**:
+  - `gemini-4-argon` is configured as the terminal final set builder component within the Autonomous Recursive Self-Improvement (RSI) loop across `src/lib/selfImprovement.ts` (`ArgonSetBuilderEngine`), `src/components/AutonomousSelfImprovementPanel.tsx`, `BioInspiredBuilderPipelinePanel`, `geminiSparkWrapper`, `SynapseEdgeWatchdogStudio`, and `server.ts`.
+  - Self-improvement adjustments are fully functional: `applyModelAdjustments` and `ArgonSetBuilderEngine.applyRefinedStructuralSetToEngine` actively enforce LTD dominance across all active synapses (clamping weights > 1.05 when `ltdRatio >= 1.25`), engage lateral ring inhibition on interneurons N12/N13, recalibrate drift velocity bounds, and persist state across sessions in `.refactor_ledger.json` and `.active_snn_tuning.json`.
 - **Cryptographic File-Content Snapshot Hashing (`server.ts`)**:
   - `POST /api/watchdog/model-refactor-proposal` and `POST /api/watchdog/apply-codebase-refactoring` compute real SHA-256 digests (`SHA256(actual file bytes)`) over the target file on disk rather than synthetic filename+timestamp hashes, and verify that the pre-update snapshot hash matches the current file state before recording a ledger commit.
 - **Firebase ID Token Authentication on State-Mutating & Export Routes (`server.ts`)**:

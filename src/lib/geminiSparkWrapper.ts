@@ -21,6 +21,7 @@ import {
   PRIMARY_GEMINI_MODEL,
   PRO_REASONING_WRAPPER_MODEL,
   GEMINI_SPARK_WRAPPER_MODEL,
+  ARGON_BUILDER_MODEL,
 } from './geminiProReasoningWrapper';
 import { SynapseEdgeWatchdogEngine, sha256Sync } from './synapseEdgeWatchdog';
 
@@ -134,6 +135,7 @@ export class GeminiSparkWrapper {
   public readonly orchestratorId = GEMINI_SPARK_WRAPPER_MODEL;
   public readonly reasoningModel = PRO_REASONING_WRAPPER_MODEL;
   public readonly executionModel = PRIMARY_GEMINI_MODEL;
+  public readonly builderModel = ARGON_BUILDER_MODEL;
 
   /**
    * Stage 1: Parse incoming SNN telemetry into a normalized 5-pillar structure
@@ -693,10 +695,11 @@ PILLAR 5: SYNAPTIC STABILITY & DIVERGENCE RISK INDEX (DRI)
       stage4BuilderExecution: {
         canBuildIntoModel: stage2Watchdog.gatePassed && stage3SparkAgent.approvedForBuilder,
         builtIntoModel: false,
-        builderIdentity: 'Autonomous Neuromorphic Builder Engine (Live SNN & Codebase Compiler)',
+        builderModel: ARGON_BUILDER_MODEL,
+        builderIdentity: `Autonomous Neuromorphic Builder Engine (${ARGON_BUILDER_MODEL})`,
         buildSummary:
           stage2Watchdog.gatePassed && stage3SparkAgent.approvedForBuilder
-            ? 'Ready for Stage 4 Builder Execution: Click "Build into Model (Builder Execute)" to compile into live SNN engine & codebase ledger.'
+            ? `Ready for Stage 4 Builder Execution: Click "Build into Model (Builder Execute)" to compile with ${ARGON_BUILDER_MODEL} into live SNN engine & codebase ledger.`
             : 'Builder locked by Watchdog / Spark Agent safety boundary.',
       },
     };
@@ -776,6 +779,7 @@ export interface BioInspiredBuilderPipelineResult {
   stage4BuilderExecution: {
     canBuildIntoModel: boolean;
     builtIntoModel: boolean;
+    builderModel?: string;
     builderIdentity: string;
     buildCommitId?: string;
     rollbackSnapshotHash?: string;

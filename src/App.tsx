@@ -12,7 +12,8 @@ import { NeuralStabilityPanel } from './components/NeuralStabilityPanel';
 import { AudioStreamingQueueBar } from './components/AudioStreamingQueueBar';
 import { SubstrateAuditPanel } from './components/SubstrateAuditPanel';
 import { AutonomousSelfImprovementPanel } from './components/AutonomousSelfImprovementPanel';
-import { AntiDivergenceEngine } from './lib/selfImprovement';
+import { ArgonSelfImprovementVisualizer } from './components/ArgonSelfImprovementVisualizer';
+import { AntiDivergenceEngine, ArgonSetBuilderEngine } from './lib/selfImprovement';
 import { SpikeFrequencyHistogram } from './components/SpikeFrequencyHistogram';
 import { HardLockedPlankCard } from './components/HardLockedPlankCard';
 import { GovaBroadcasterStudio } from './components/GovaBroadcasterStudio';
@@ -87,6 +88,7 @@ const MemoizedSynapticMatrixView = React.memo(SynapticMatrixView);
 const MemoizedAERStreamInspector = React.memo(AERStreamInspector);
 const MemoizedSubstrateAuditPanel = React.memo(SubstrateAuditPanel);
 const MemoizedAutonomousSelfImprovementPanel = React.memo(AutonomousSelfImprovementPanel);
+const MemoizedArgonSelfImprovementVisualizer = React.memo(ArgonSelfImprovementVisualizer);
 const MemoizedUnifiedTelemetryHealthMonitorPanel = React.memo(UnifiedTelemetryHealthMonitorPanel);
 const MemoizedGovaBroadcasterStudio = React.memo(GovaBroadcasterStudio);
 const MemoizedGeminiChatPanel = React.memo(GeminiChatPanel);
@@ -551,8 +553,19 @@ export default function App() {
         const shadowTrial = engineRef.current.runShadowSimulationTrial(verification.sanitized, 100);
         setShadowTrialAlert({ active: true, result: shadowTrial });
 
+        // Argon Model (gemini-4-argon) Final Set Builder Component
+        const argonSet = data.argonBuilderSet || ArgonSetBuilderEngine.synthesizeFinalStructuralSet({
+          currentTuning: curTuning,
+          candidateTuning: verification.sanitized as SNNTuningConfig,
+          currentDri: curMetrics.divergenceRiskIndex,
+          projectedDri: data.projectedDivergenceRisk ?? 0.12,
+          telemetry: curTelemetry,
+          biologicalLiterature: data.biologicalLiteratureFindings,
+          epochNumber: data.epoch?.epochNumber ?? 1,
+        });
+
         if (shadowTrial.approved) {
-          engineRef.current.applyModelAdjustments(verification.sanitized);
+          ArgonSetBuilderEngine.applyRefinedStructuralSetToEngine(engineRef.current, argonSet);
         } else {
           console.warn('[RSI Shadow Trial] Warning: Shadow simulation flagged divergence risk, applying safe homeostatic baseline', shadowTrial.warnings);
           engineRef.current.applyModelAdjustments(AntiDivergenceEngine.getHomeostaticBaseline());
@@ -569,6 +582,7 @@ export default function App() {
           ...data.epoch,
           shadowValidation: shadowTrial,
           verificationStatus: shadowTrial.approved ? 'verified_applied' : 'hard_plank_enforced',
+          argonBuilderSet: argonSet,
         };
 
         setRsiState((prev) => {
@@ -584,6 +598,7 @@ export default function App() {
             lastShadowTrial: shadowTrial,
             lastEvaluationTime: Date.now(),
             isAnalyzing: false,
+            activeArgonSet: argonSet,
           };
         });
       }
@@ -1393,18 +1408,36 @@ export default function App() {
 
         {/* Tab 5: Autonomous Recursive Self-Improvement & Anti-Divergence Panel */}
         {activeTab === 'rsi' && (
-          <MemoizedAutonomousSelfImprovementPanel
-            engine={engine}
-            telemetry={telemetry}
-            tuningConfig={activeTuning}
-            rsiState={rsiState}
-            onToggleActive={handleToggleRsiActive}
-            onSetMode={handleSetRsiMode}
-            onTriggerEpoch={(reason, researchQuery) => handleTriggerRsiEpoch(reason, researchQuery)}
-            onRollbackLastEpoch={handleRollbackLastEpoch}
-            onRevertBaseline={handleRevertBaseline}
-            isEvaluating={rsiState.isAnalyzing}
-          />
+          <div className="space-y-4">
+            <MemoizedArgonSelfImprovementVisualizer
+              engine={engine}
+              telemetry={telemetry}
+              tuningConfig={activeTuning}
+              rsiState={rsiState}
+              onApplyArgonSet={(argonSet) => {
+                setActiveTuning(argonSet.hyperparameterSet);
+                setRsiState((prev) => ({
+                  ...prev,
+                  activeArgonSet: argonSet,
+                }));
+              }}
+              onTriggerEpoch={(reason, researchQuery) =>
+                handleTriggerRsiEpoch(reason, researchQuery)
+              }
+            />
+            <MemoizedAutonomousSelfImprovementPanel
+              engine={engine}
+              telemetry={telemetry}
+              tuningConfig={activeTuning}
+              rsiState={rsiState}
+              onToggleActive={handleToggleRsiActive}
+              onSetMode={handleSetRsiMode}
+              onTriggerEpoch={(reason, researchQuery) => handleTriggerRsiEpoch(reason, researchQuery)}
+              onRollbackLastEpoch={handleRollbackLastEpoch}
+              onRevertBaseline={handleRevertBaseline}
+              isEvaluating={rsiState.isAnalyzing}
+            />
+          </div>
         )}
 
         {/* Tab: Unified Telemetry Health-Check Monitor & Dedicated Performance Buffer */}

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
+  Shield,
   ShieldCheck,
   ShieldAlert,
   AlertTriangle,
@@ -551,8 +552,8 @@ export function useUnifiedSparkEvaluationHook(params: {
           for (let k = 0; k < 12; k++) {
             stepBalancedHomeostasis(liveBalanced);
           }
-          engine.corticalActiveFraction = liveBalanced.corticalActiveFraction;
-          engine.measuredBranchingRatio = liveBalanced.branchingRatio;
+          // Do not overwrite measured simulation telemetry (measuredBranchingRatio, corticalActiveFraction).
+          // They reflect independent measurements from the SNN simulation engine.
           engine.phaseJitterMs = liveBalanced.phaseJitterMs;
           engine.closedLoopState.signalToNoiseRatioDb = liveBalanced.signalToNoiseRatioDb;
           engine.closedLoopState.ltdLtpRatio = liveBalanced.ltdLtpRatio;
@@ -687,6 +688,44 @@ interface SynapseEdgeWatchdogStudioProps {
   onReportSparkBenchmarkToRsi?: (payload: StandardizedSparkBenchmarkReportPayload) => void;
 }
 
+/**
+ * Fail-Closed Policy Enforcement:
+ * Any proposal that does not explicitly match known verified safe patterns
+ * must be escalated to the operator rather than being automatically approved.
+ */
+export function enforceFailClosedPolicy(
+  decision: WatchdogProposalDecision,
+  changeText: string
+): WatchdogProposalDecision {
+  if (decision.decision !== 'APPROVE') {
+    return decision;
+  }
+  const isSafe = SynapseEdgeWatchdogEngine.isExplicitlySafeProposal(changeText.toLowerCase());
+  if (!isSafe) {
+    const updatedRules = [
+      ...decision.rulesTriggered.filter((r) => !r.startsWith('ALLOW:')),
+      'FAIL-CLOSED: Unrecognized proposal pattern; mandatory operator escalation required (fail-closed policy)',
+    ];
+    return {
+      ...decision,
+      decision: 'ESCALATE',
+      reason: `Fail-closed policy: Proposal does not explicitly match verified safe patterns. Operator escalation required before automatic authorization. (${decision.reason})`,
+      evaluatorVerdict: 'AMBIGUOUS',
+      reviewerVerdict: 'AMBIGUOUS',
+      disagreement: true,
+      rulesTriggered: updatedRules,
+      simulatedSandbox: {
+        ...decision.simulatedSandbox,
+        risksDetected: [
+          ...(decision.simulatedSandbox?.risksDetected || []),
+          'Unrecognized proposal intent: Fail-closed operator escalation required',
+        ],
+      },
+    };
+  }
+  return decision;
+}
+
 export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps> = ({
   engine,
   activeTuning,
@@ -719,7 +758,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
   // SNN Model Builder Bridge & Codebase Self-Refactoring Gate state
   const [targetModule, setTargetModule] = useState<'snn_engine' | 'drift_guard' | 'self_improvement' | 'substrate' | 'watchdog_engine'>('snn_engine');
   const [directive, setDirective] = useState<string>('Refactor STDP trace kinetics to enforce asymmetric LTD dominance ratio (A- / A+ >= 1.35)');
-  const [builderModel, setBuilderModel] = useState<string>('gemini-3.8-flash');
+  const [builderModel, setBuilderModel] = useState<string>('gemini-4-argon');
   const [isGeneratingProposal, setIsGeneratingProposal] = useState<boolean>(false);
   const [modelProposalResult, setModelProposalResult] = useState<{
     proposal: {
@@ -876,7 +915,8 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
 
   // Initial evaluation of default proposal
   useEffect(() => {
-    const initialDec = SynapseEdgeWatchdogEngine.evaluateV3SparkRsi(proposalInput);
+    const rawDec = SynapseEdgeWatchdogEngine.evaluateV3SparkRsi(proposalInput);
+    const initialDec = enforceFailClosedPolicy(rawDec, proposalInput);
     setCurrentDecision(initialDec);
   }, []);
 
@@ -888,12 +928,15 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
 
       setIsEvaluatingProposal(true);
       setTimeout(() => {
-        const dec =
+        const rawDec =
           ruleVersion === 'first_version'
             ? SynapseEdgeWatchdogEngine.evaluateV1(text)
             : ruleVersion === 'improved_rules'
             ? SynapseEdgeWatchdogEngine.evaluateV2(text)
             : SynapseEdgeWatchdogEngine.evaluateV3SparkRsi(text);
+
+        // Fail-Closed Policy: Any proposal that does not explicitly match known safe patterns escalates
+        const dec = enforceFailClosedPolicy(rawDec, text);
 
         setCurrentDecision(dec);
         setDecisionHistory((prev) => [dec, ...prev.slice(0, 19)]);
@@ -954,6 +997,13 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
       }
 
       const data = await resp.json();
+      if (data.decision) {
+        // Enforce fail-closed policy on model generated proposals as well
+        const proposalContent = `${data.proposal?.title || ''}\n${data.proposal?.diff || ''}\n${dir}`;
+        const enforcedDecision = enforceFailClosedPolicy(data.decision, proposalContent);
+        data.decision = enforcedDecision;
+        data.canWriteToCodebase = enforcedDecision.decision === 'APPROVE';
+      }
       setModelProposalResult(data);
       if (data.decision) {
         const entry = SynapseEdgeWatchdogEngine.createLogicFlowEntry(
@@ -1097,7 +1147,8 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
   // Simulate a single poisoned vector and log its path through the Logic Flow Auditor
   const handleSimulateSinglePoisonedVector = useCallback((vec: PoisonedTestVector) => {
     const payload = `${vec.poisonedProposalText}\n${vec.poisonedDiff}\nFile: ${vec.targetModule}`;
-    const dec = SynapseEdgeWatchdogEngine.evaluateV2(payload);
+    const rawDec = SynapseEdgeWatchdogEngine.evaluateV2(payload);
+    const dec = enforceFailClosedPolicy(rawDec, payload);
     setCurrentDecision(dec);
     const entry = SynapseEdgeWatchdogEngine.createLogicFlowEntry(
       dec,
@@ -1338,15 +1389,28 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
               Pre-execution state snapshot with cryptographic rollback guarantee on every decision.
             </p>
           </div>
-          <div className="p-3 bg-slate-950/60 rounded border border-slate-800/80">
-            <div className="text-indigo-400 font-bold flex items-center gap-1.5 mb-1">
+          <div className="p-3 bg-amber-950/20 rounded border border-amber-500/40">
+            <div className="text-amber-400 font-bold flex items-center gap-1.5 mb-1">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-              <span>4. Default Escalate to DJ</span>
+              <span>4. Fail-Closed Posture</span>
             </div>
-            <p className="text-slate-400 leading-relaxed">
-              Unexplained changes, supervisor impersonations, and ambiguous diffs route directly to humans.
+            <p className="text-amber-200/80 leading-relaxed">
+              Unmatched or novel proposals escalate to operator (DJ). Auto-approval without explicit safe-match is barred.
             </p>
           </div>
+        </div>
+
+        {/* Fail-Closed Banner */}
+        <div className="mt-3 px-3 py-2 bg-indigo-950/40 border border-indigo-500/30 rounded-lg flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2 text-indigo-300">
+            <Shield className="w-4 h-4 text-indigo-400 shrink-0" />
+            <span>
+              <strong>Fail-Closed Security Posture Active:</strong> Any proposal that does not explicitly match verified safe patterns escalates to the operator.
+            </span>
+          </div>
+          <span className="text-[10px] text-indigo-400 font-mono bg-indigo-900/50 px-2 py-0.5 rounded border border-indigo-700/50">
+            FAIL_CLOSED_V3
+          </span>
         </div>
       </div>
 
@@ -1856,6 +1920,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                   onChange={(e) => setBuilderModel(e.target.value)}
                   className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs focus:outline-none focus:border-indigo-500"
                 >
+                  <option value="gemini-4-argon">Gemini 4 Argon (Final Set Builder & RSI Self-Improvement Engine)</option>
                   <option value="gemini-3.8-flash">Gemini 3.8 Flash + 3.1 Pro + Gemini Spark Wrapper</option>
                   <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro + Spark (Deep Invariant & Code Synthesis)</option>
                   <option value="algorithmic-snn-builder">Algorithmic Biological Builder</option>
@@ -4004,7 +4069,8 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {novelCases.map((nc) => {
-              const evalRes = SynapseEdgeWatchdogEngine.evaluateV2(nc.change);
+              const rawEval = SynapseEdgeWatchdogEngine.evaluateV3SparkRsi(nc.change);
+              const evalRes = enforceFailClosedPolicy(rawEval, nc.change);
               return (
                 <div key={nc.id} className="p-3 bg-slate-950 rounded-lg border border-slate-800">
                   <div className="flex items-center justify-between">

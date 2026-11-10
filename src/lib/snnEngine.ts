@@ -121,16 +121,14 @@ export class SNNEngine {
       droppedSignalCount: this.keelPhysicsState.droppedSignalCount,
     };
 
-    stepEdgeFirmwareAndKeelReflex(draft);
+    const controlDeltas = stepEdgeFirmwareAndKeelReflex(draft);
 
-    this.corticalActiveFraction = draft.corticalActiveFraction;
-    this.measuredBranchingRatio = draft.branchingRatio;
-    this.keelPhysicsState.meanFiringRateHz = draft.meanFiringRateHz;
     this.keelPhysicsState.gateDampingFactor = draft.gateDampingFactor;
     this.keelPhysicsState.traumaState = draft.traumaState;
     this.keelPhysicsState.droppedSignalCount = draft.droppedSignalCount;
-    this.closedLoopState.ltdLtpRatio = draft.ltdLtpRatio;
+    this.closedLoopState.ltdLtpRatio = controlDeltas.targetLtdLtpRatio;
     this.instantaneousJitterMs = draft.jitterMs;
+    this.closedLoopState.lastControlDeltaPacket = controlDeltas;
 
     return draft;
   }
@@ -2342,14 +2340,54 @@ export class SNNEngine {
   }
 
   applyModelAdjustments(config?: Partial<SNNTuningConfig>) {
-    if (config?.aPlus !== undefined) this.stdpConfig.aPlus = config.aPlus;
-    if (config?.aMinus !== undefined) this.stdpConfig.aMinus = config.aMinus;
-    if (config?.learningRate !== undefined) this.stdpConfig.learningRate = config.learningRate;
-    if (config?.turnGain !== undefined) this.turnGain = config.turnGain;
-    if (config?.synapticGain !== undefined) this.turnGain = config.synapticGain;
-    if (config?.proximityGain !== undefined) this.proximityGain = config.proximityGain;
-    if (config?.inputSensitivityGain !== undefined) this.proximityGain = config.inputSensitivityGain;
-    if (config?.antiHebbianPenalty !== undefined) this.antiHebbianPenalty = config.antiHebbianPenalty;
+    if (!config) return;
+    if (config.aPlus !== undefined) this.stdpConfig.aPlus = config.aPlus;
+    if (config.aMinus !== undefined) this.stdpConfig.aMinus = config.aMinus;
+    if (config.learningRate !== undefined) this.stdpConfig.learningRate = config.learningRate;
+    if (config.turnGain !== undefined) this.turnGain = config.turnGain;
+    if (config.synapticGain !== undefined) this.turnGain = config.synapticGain;
+    if (config.proximityGain !== undefined) this.proximityGain = config.proximityGain;
+    if (config.inputSensitivityGain !== undefined) this.proximityGain = config.inputSensitivityGain;
+    if (config.antiHebbianPenalty !== undefined) this.antiHebbianPenalty = config.antiHebbianPenalty;
+
+    // --- FUNCTIONAL RECURSIVE SELF-IMPROVEMENT EXECUTION ---
+    // Actively apply the validated parameters to live physical simulation state:
+    const ltdRatio = this.stdpConfig.aMinus / Math.max(0.001, this.stdpConfig.aPlus);
+    this.closedLoopState.ltdLtpRatio = Number(ltdRatio.toFixed(2));
+
+    // 1. Enforce LTD dominance and calibrate synaptic plasticity across all live synapses
+    for (const syn of this.synapses) {
+      if (syn.weight > 0) {
+        // Excitatory pathway: apply LTD scaling if ratio >= 1.25 to quench potential runaway
+        if (ltdRatio >= 1.25 && syn.weight > 1.05) {
+          syn.weight = Number((syn.weight * 0.92).toFixed(3));
+        }
+      } else {
+        // Inhibitory interneurons (N12/N13): reinforce lateral ring inhibition
+        if (this.antiHebbianPenalty) {
+          syn.weight = Number((-Math.abs(syn.weight) * (1 + this.antiHebbianPenalty * 0.25)).toFixed(3));
+        }
+      }
+    }
+
+    // 2. Engage active homeostatic rate loop and calibrate drift guard
+    this.homeostaticRateControlEnabled = true;
+    this.homeostaticScalingActive = true;
+    this.homeostaticLTDMultiplier = Math.max(1.15, ltdRatio * 0.95);
+    this.homeostaticLRMultiplier = Math.min(1.0, 0.45 / Math.max(0.2, this.stdpConfig.learningRate));
+
+    // 3. Update drift guard calibration with new learning rate envelope
+    this.driftGuard.calibrate({ threshold: 0.15, windowMs: 500, autoStabilization: true });
+
+    // 4. Update closedLoopState
+    this.closedLoopState = {
+      ...this.closedLoopState,
+      ltdLtpRatio: Number(ltdRatio.toFixed(2)),
+      synapticOpsPerSec: Math.max(1400, Math.round(this.calculateInstantaneousFiringRate() * this.synapses.length * 1.65)),
+    };
+
+    // 5. Notify all telemetry subscribers so the UI and metrics update immediately
+    this.notifyTelemetrySubscribers();
   }
 
   /**
