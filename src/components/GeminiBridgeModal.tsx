@@ -26,6 +26,7 @@ import {
   Bot,
 } from 'lucide-react';
 import { HardwareTelemetry, SNNTuningConfig, SynapticDriftGuardSnapshot } from '../types';
+import { GoogleDriveWorkspacePanel } from './GoogleDriveWorkspacePanel';
 
 interface GeminiBridgeModalProps {
   isOpen: boolean;
@@ -35,6 +36,7 @@ interface GeminiBridgeModalProps {
   driftSnapshot?: SynapticDriftGuardSnapshot | null;
   onApplyAdjustments?: (adjustments: Partial<SNNTuningConfig>) => void;
   onNavigateToWatchdogStudio?: () => void;
+  initialTab?: 'overview' | 'builder_watchdog' | 'local_wrapper' | 'drive_sync' | 'memory_json';
 }
 
 export const GeminiBridgeModal: React.FC<GeminiBridgeModalProps> = ({
@@ -45,8 +47,9 @@ export const GeminiBridgeModal: React.FC<GeminiBridgeModalProps> = ({
   driftSnapshot,
   onApplyAdjustments,
   onNavigateToWatchdogStudio,
+  initialTab = 'overview',
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'builder_watchdog' | 'local_wrapper' | 'drive_sync' | 'memory_json'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'builder_watchdog' | 'local_wrapper' | 'drive_sync' | 'memory_json'>(initialTab);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
@@ -61,12 +64,13 @@ export const GeminiBridgeModal: React.FC<GeminiBridgeModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setActiveTab(initialTab);
       fetch('/api/bridge/context')
         .then((res) => res.json())
         .then((data) => setMemoryState(data))
         .catch(() => {});
     }
-  }, [isOpen]);
+  }, [isOpen, initialTab]);
 
   if (!isOpen) return null;
 
@@ -322,18 +326,27 @@ python3 scripts/gemini_drive_bridge.py --drive-dir "~/Google Drive/AI Studio Syn
                   </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
-                  <div className="flex items-center gap-2 text-indigo-300 font-semibold">
-                    <HardDrive className="w-4 h-4 text-indigo-400" />
-                    <span>Approach 1: Shared Google Drive Folder Sync</span>
+                <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-indigo-300 font-semibold">
+                      <HardDrive className="w-4 h-4 text-indigo-400" />
+                      <span>Approach 1: Live Google Drive Workspace & Folder Sync</span>
+                    </div>
+                    <p className="text-slate-300 text-[11px] leading-relaxed">
+                      Directly browse your Google Drive files, push live SNN telemetry reports, and sync <code className="text-indigo-300 font-mono">workspace_memory.json</code> and <code className="text-indigo-300 font-mono">system_state.md</code> via Google Drive OAuth.
+                    </p>
                   </div>
-                  <p className="text-slate-300 text-[11px] leading-relaxed">
-                    Leverages Google Drive as a shared memory bus. AI Studio prompt configs and Gemini workspace documents automatically share <code className="text-indigo-300 font-mono">system_state.md</code> across web and desktop apps.
-                  </p>
-                  <div className="pt-2">
+                  <div className="pt-2 flex items-center justify-between gap-2">
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                       Best for Cross-Device Workspace Sync
                     </span>
+                    <button
+                      onClick={() => setActiveTab('drive_sync')}
+                      className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <span>Open Drive Bus</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -733,10 +746,18 @@ python3 scripts/gemini_drive_bridge.py --drive-dir "~/Google Drive/AI Studio Syn
           {/* Tab 3: Google Drive Sync */}
           {activeTab === 'drive_sync' && (
             <div className="space-y-4">
+              {/* Live Google Drive Cloud API Integration */}
+              <GoogleDriveWorkspacePanel
+                telemetry={telemetry}
+                tuningConfig={tuningConfig}
+                memoryState={memoryState}
+                onImportTuningFromDrive={onApplyAdjustments}
+              />
+
               <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
                 <h3 className="font-semibold text-white flex items-center gap-2">
                   <HardDrive className="w-4 h-4 text-indigo-400" />
-                  <span>Google Drive Folder Synchronizer</span>
+                  <span>Local CLI Google Drive Folder Synchronizer</span>
                 </h3>
                 <p className="text-slate-300 text-[11px] leading-relaxed">
                   Located at <code className="text-indigo-300 font-mono">scripts/gemini_drive_bridge.py</code>. Keeps your local <code className="text-indigo-300 font-mono">workspace_memory.json</code> and <code className="text-indigo-300 font-mono">system_state.md</code> continuously synced with your Google Drive folder (e.g. your Google AI Studio Drive directory).
@@ -757,15 +778,6 @@ python3 scripts/gemini_drive_bridge.py --drive-dir "~/Google Drive/AI Studio Syn
                 <pre className="p-3 rounded-lg bg-slate-900 border border-slate-800 font-mono text-[11px] text-indigo-300 overflow-x-auto whitespace-pre">
                   {sampleDriveSyncCode}
                 </pre>
-              </div>
-
-              <div className="p-3.5 rounded-lg bg-slate-900/80 border border-slate-800 text-slate-300 text-[11px] space-y-2">
-                <h4 className="font-semibold text-white">Recommended Workflow:</h4>
-                <ul className="list-disc list-inside space-y-1 text-slate-400">
-                  <li>Keep <code className="text-sky-300 font-mono">gemini_drive_bridge.py --watch</code> running in a background terminal.</li>
-                  <li>In Gemini web or mobile app, open <code className="text-sky-300 font-mono">system_state.md</code> directly from Google Drive.</li>
-                  <li>Any updates made in AI Studio or locally will immediately reflect in your Google Drive file!</li>
-                </ul>
               </div>
             </div>
           )}

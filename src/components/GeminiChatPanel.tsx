@@ -15,15 +15,15 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
       id: 'init-1',
       role: 'assistant',
       content:
-        'Greetings. I am your Neuromorphic Systems Copilot powered by Gemini. You can toggle roles and models above: Fast (Flash-Lite) for responsive edge feedback, General (Flash) for neural telemetry, or Complex for mathematical and architectural synthesis. How can I assist your biological SNN and signal processing pipeline today?',
+        'Greetings. I am your Neuromorphic Systems Copilot powered by Gemini 3.8 Flash wrapped with both the Gemini Spark Wrapper (Lateral Hypothesis Ignition, Multi-Agent SPARK_DIALOGUE_STEP Orchestration & Emergent Code Catalysis) and the Gemini 3.1 Pro Reasoning & Coding Skills Wrapper. Every response combines 3.8 Flash speed, Gemini Spark creative catalysis, and 3.1 Pro formal mathematical & coding verification. How can I assist your biological SNN and signal processing pipeline today?',
       timestamp: Date.now(),
-      modelUsed: 'gemini-3.1-flash-lite',
+      modelUsed: 'gemini-3.8-flash (3.1 Pro + Gemini Spark Wrapper)',
       roleUsed: 'neuromorphic_architect',
     },
   ]);
 
   const [inputMessage, setInputMessage] = useState('');
-  const [modelTier, setModelTier] = useState<'fast' | 'general' | 'complex'>('fast');
+  const [modelTier, setModelTier] = useState<'fast' | 'general' | 'complex'>('general');
   const [selectedRole, setSelectedRole] = useState<'neuromorphic_architect' | 'plasticity_researcher' | 'edge_firmware_engineer' | 'gova_broadcaster'>('neuromorphic_architect');
   const [attachTelemetry, setAttachTelemetry] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -158,17 +158,21 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
       {/* Header with Model Tier & Role Selector */}
       <div className="pb-3 border-b border-slate-800 space-y-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <MessageSquare className="w-4 h-4 text-sky-400" />
             <h3 className="text-sm font-semibold text-slate-100">
-              Gemini Neuromorphic AI Chatbot
+              Gemini 3.8 Flash Neuromorphic Copilot
             </h3>
-            <span className="text-[10px] font-mono bg-sky-500/10 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded">
-              Multi-Turn Interactive
+            <span className="text-[10px] font-mono bg-indigo-500/15 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded font-semibold">
+              3.1 Pro Reasoning & Coding Wrapper
+            </span>
+            <span className="text-[10px] font-mono bg-amber-500/15 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded font-semibold flex items-center gap-1">
+              <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+              Gemini Spark Wrapper
             </span>
           </div>
 
-          {/* Model Tier Selector (Explicit instruction requirement) */}
+          {/* Model Tier Selector */}
           <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
             <button
               onClick={() => setModelTier('fast')}
@@ -177,10 +181,10 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
                   ? 'bg-emerald-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="gemini-3.1-flash-lite: for tasks that should happen fast"
+              title="gemini-3.8-flash (Low Thinking) with Gemini Spark + 3.1 Pro Wrapper"
             >
               <Zap className="w-3 h-3" />
-              Fast (Flash-Lite)
+              3.8 Flash (Fast)
             </button>
             <button
               onClick={() => setModelTier('general')}
@@ -189,10 +193,10 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
                   ? 'bg-sky-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="gemini-3.8-flash: for general tasks"
+              title="gemini-3.8-flash (Medium Thinking) with Gemini Spark + 3.1 Pro Reasoning & Coding Wrapper"
             >
               <Sparkles className="w-3 h-3" />
-              General (Flash)
+              3.8 + Spark (General)
             </button>
             <button
               onClick={() => setModelTier('complex')}
@@ -201,12 +205,35 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
                   ? 'bg-indigo-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="gemini-3.1-pro-preview: for particularly complex tasks"
+              title="gemini-3.8-flash (High Thinking) + Gemini Spark Ignition + 3.1 Pro Deep Reasoning & Coding Wrapper"
             >
               <Cpu className="w-3 h-3" />
-              Complex (Pro Preview)
+              3.8 + 3.1 Pro + Spark (Deep)
             </button>
           </div>
+        </div>
+
+        {/* Active 3.1 Pro + Gemini Spark Wrapper Skills Strip */}
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-950/80 border border-indigo-500/25 rounded-lg px-2.5 py-1.5 text-[10px] font-mono">
+          <span className="text-indigo-300 font-bold flex items-center gap-1">
+            <Brain className="w-3 h-3 text-indigo-400" />
+            3.1 Pro + Spark Skills:
+          </span>
+          <span className="bg-slate-900 border border-amber-500/30 px-1.5 py-0.5 rounded text-amber-300">
+            ⚡ Spark Lateral Hypothesis Ignition
+          </span>
+          <span className="bg-slate-900 border border-amber-500/30 px-1.5 py-0.5 rounded text-amber-200">
+            ⚡ Spark Multi-Agent Orchestrator
+          </span>
+          <span className="bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded text-sky-300">
+            Causal & Differential Reasoning
+          </span>
+          <span className="bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded text-emerald-300">
+            Emergent Code & Diff Catalysis
+          </span>
+          <span className="bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded text-purple-300">
+            Ghost Protocol Self-Audit
+          </span>
         </div>
 
         {/* Role & Telemetry Context Bar */}
@@ -340,7 +367,11 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
         {isLoading && (
           <div className="flex items-center gap-2 text-slate-400 text-xs py-2">
             <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
-            <span>Consulting {modelTier === 'complex' ? 'Gemini Complex (Pro / Flash-Lite)' : modelTier === 'fast' ? 'Gemini Fast (3.1 Flash-Lite)' : 'Gemini General (Flash / Flash-Lite)'}...</span>
+            <span>
+              Consulting Gemini 3.8 Flash wrapped with Gemini Spark + 3.1 Pro Reasoning & Coding Skills (
+              {modelTier === 'complex' ? 'High Thinking' : modelTier === 'fast' ? 'Low Thinking' : 'Medium Thinking'}
+              )...
+            </span>
           </div>
         )}
 

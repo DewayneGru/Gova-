@@ -68,7 +68,7 @@ export const AERStreamInspector: React.FC<AERStreamInspectorProps> = ({
       </div>
 
       {/* Embedded Edge Protocol Telemetry Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs font-mono">
         <div className="bg-[#0a0f1d] border border-slate-800 p-2 rounded">
           <div className="text-slate-500 text-[10px]">AER Bus Latency</div>
           <div className="text-emerald-400 font-bold">{aerLatencyMs.toFixed(2)} ms</div>
@@ -77,13 +77,25 @@ export const AERStreamInspector: React.FC<AERStreamInspectorProps> = ({
           <div className="text-slate-500 text-[10px]">Bus Throughput</div>
           <div className="text-sky-400 font-bold">~{Math.max(12, packets.length * 16)} kEvents/s</div>
         </div>
-        <div className="bg-[#0a0f1d] border border-slate-800 p-2 rounded">
-          <div className="text-slate-500 text-[10px]">Transport Protocol</div>
-          <div className="text-amber-400 font-bold">AER 4-Phase Bundled-Data</div>
+        <div className="bg-[#0a0f1d] border border-purple-500/30 p-2 rounded">
+          <div className="text-slate-500 text-[10px]">Phase-Jitter Factor</div>
+          <div className="text-purple-400 font-bold">
+            {(packets[0]?.bsiDecorrelationActive ? 1.2 : 0.75).toFixed(2)} ms
+          </div>
+        </div>
+        <div className="bg-[#0a0f1d] border border-cyan-500/30 p-2 rounded">
+          <div className="text-slate-500 text-[10px]">Inhib. Conduction Vel.</div>
+          <div className="text-cyan-400 font-bold">
+            {(packets[0]?.inhibitoryConductionVelocity ?? 1.11).toFixed(2)}x
+          </div>
         </div>
         <div className="bg-[#0a0f1d] border border-slate-800 p-2 rounded">
-          <div className="text-slate-500 text-[10px]">Payload Format</div>
-          <div className="text-slate-300 font-bold">16-bit Addr:Timestamp</div>
+          <div className="text-slate-500 text-[10px]">Transport Protocol</div>
+          <div className="text-amber-400 font-bold">AER 4-Phase Bundled</div>
+        </div>
+        <div className="bg-[#0a0f1d] border border-emerald-500/30 p-2 rounded">
+          <div className="text-slate-500 text-[10px]">BSI Target Band</div>
+          <div className="text-emerald-300 font-bold">[0.10, 0.28] LOCKED</div>
         </div>
       </div>
 
@@ -106,14 +118,16 @@ export const AERStreamInspector: React.FC<AERStreamInspectorProps> = ({
               dotColor = 'bg-amber-400';
             }
 
+            const jitterDelta = pkt.phaseJitterOffsetMs ?? 0;
+
             return (
               <div
                 key={pkt.id}
                 className="flex items-center justify-between gap-2 px-2 py-0.5 rounded hover:bg-slate-900/60 transition-colors"
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-slate-500 w-16 text-[10px]">
-                    +{pkt.timestamp}ms
+                  <span className="text-slate-500 w-20 text-[10px]">
+                    +{pkt.timestamp.toFixed(2)}ms
                   </span>
                   <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
                   <span className={`px-1.5 py-0.2 rounded text-[9px] uppercase tracking-wider ${layerBadge}`}>
@@ -122,7 +136,12 @@ export const AERStreamInspector: React.FC<AERStreamInspectorProps> = ({
                   <span className="text-slate-200 font-medium">{pkt.neuronLabel}</span>
                 </div>
 
-                <div className="flex items-center gap-3 text-slate-400">
+                <div className="flex items-center gap-2.5 text-slate-400">
+                  {Math.abs(jitterDelta) > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-500/30">
+                      Δt:{jitterDelta >= 0 ? '+' : ''}{jitterDelta.toFixed(2)}ms ({(pkt.inhibitoryConductionVelocity ?? 1.11).toFixed(2)}x)
+                    </span>
+                  )}
                   <span className="text-sky-300 font-mono text-[10px]">{pkt.hexPayload}</span>
                   <span className="text-emerald-400 text-[10px] font-bold">SPIKE_ON</span>
                 </div>

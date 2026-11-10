@@ -29,6 +29,7 @@ import {
   Layers,
   FlaskConical,
   TrendingUp,
+  Hammer,
 } from 'lucide-react';
 import { AudioListenButton } from './AudioListenButton';
 import { useAudioVoice } from '../context/AudioContext';
@@ -36,6 +37,8 @@ import { ModelGuidanceDialog } from './ModelGuidanceDialog';
 import { SNNPersonalityManager } from './SNNPersonalityManager';
 import { ModelTelemetryInspectionModal } from './ModelTelemetryInspectionModal';
 import { SNNEngine } from '../lib/snnEngine';
+import { geminiSparkWrapper } from '../lib/geminiSparkWrapper';
+import { BioInspiredBuilderPipelinePanel } from './BioInspiredBuilderPipelinePanel';
 
 interface ModelAdjustmentsCardProps {
   diagnostic: ModelDiagnosticRecommendation | null;
@@ -81,6 +84,8 @@ export const ModelAdjustmentsCard: React.FC<ModelAdjustmentsCardProps> = ({
   const [isGuidanceOpen, setIsGuidanceOpen] = useState(false);
   const [isEditingFixes, setIsEditingFixes] = useState(false);
   const [isTelemetryModalOpen, setIsTelemetryModalOpen] = useState(false);
+  const [showSparkHybridPipeline, setShowSparkHybridPipeline] = useState(false);
+  const [showBioBuilderPipeline, setShowBioBuilderPipeline] = useState(true);
   const {
     autoAudioReadout,
     setAutoAudioReadout,
@@ -88,12 +93,20 @@ export const ModelAdjustmentsCard: React.FC<ModelAdjustmentsCardProps> = ({
     stopAudio,
   } = useAudioVoice();
 
+  const liveSparkPacket = geminiSparkWrapper.buildHybridExecutionPacket(
+    engine ? engine.getTelemetry() : undefined,
+    engine ? engine.getUnifiedTelemetrySnapshot() : undefined,
+    undefined,
+    activeTuning,
+    3.5
+  );
+
   // Fine-tuning draft state
   const [draftAplus, setDraftAplus] = useState(diagnostic?.parameters.aPlus.recommended ?? 0.032);
-  const [draftAminus, setDraftAminus] = useState(diagnostic?.parameters.aMinus.recommended ?? 0.052);
-  const [draftLR, setDraftLR] = useState(diagnostic?.parameters.learningRate.recommended ?? 0.40);
-  const [draftTurn, setDraftTurn] = useState(diagnostic?.parameters.turnGain.recommended ?? 3.50);
-  const [draftProx, setDraftProx] = useState(diagnostic?.parameters.proximityGain.recommended ?? 1.65);
+  const [draftAminus, setDraftAminus] = useState(diagnostic?.parameters.aMinus.recommended ?? 0.048);
+  const [draftLR, setDraftLR] = useState(diagnostic?.parameters.learningRate.recommended ?? 0.38);
+  const [draftTurn, setDraftTurn] = useState(diagnostic?.parameters.turnGain.recommended ?? 2.85);
+  const [draftProx, setDraftProx] = useState(diagnostic?.parameters.proximityGain.recommended ?? 1.35);
 
   // Synchronize draft state when a new diagnostic or guidance result arrives
   useEffect(() => {
@@ -160,6 +173,14 @@ export const ModelAdjustmentsCard: React.FC<ModelAdjustmentsCardProps> = ({
               </button>
             )}
 
+            <button
+              onClick={() => setShowBioBuilderPipeline((prev) => !prev)}
+              className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <Hammer className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{showBioBuilderPipeline ? 'Hide Bio-Builder Pipeline' : 'Bio-Builder Pipeline (4 Stages)'}</span>
+            </button>
+
             {onApplyPersonality && onExportPersonality && currentStdpConfig && synapses && (
               <SNNPersonalityManager
                 currentTuning={activeTuning}
@@ -171,6 +192,16 @@ export const ModelAdjustmentsCard: React.FC<ModelAdjustmentsCardProps> = ({
             )}
           </div>
         </div>
+
+        {showBioBuilderPipeline && (
+          <BioInspiredBuilderPipelinePanel
+            engine={engine}
+            activeTuning={activeTuning}
+            onApplyAdjustments={onApplyAdjustments}
+            onRunShadowTrial={onRunShadowTrial}
+            compact
+          />
+        )}
 
         {/* Current Active Specs Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 font-mono text-[11px]">
@@ -244,16 +275,22 @@ export const ModelAdjustmentsCard: React.FC<ModelAdjustmentsCardProps> = ({
             <Bot className="w-4 h-4" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-xs font-bold text-slate-100 tracking-wide uppercase">
                 Model's Last Diagnostic & Parameter Tuning
               </h3>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold">
                 {diagnostic.model}
               </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-semibold">
+                3.1 Pro Reasoning & Coding Wrapper
+              </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-semibold">
+                ⚡ Gemini Spark Wrapper
+              </span>
             </div>
             <div className="text-[11px] text-slate-400">
-              Generated {new Date(diagnostic.timestamp).toLocaleTimeString()} • Closed-loop stability optimization
+              Generated {new Date(diagnostic.timestamp).toLocaleTimeString()} • 3.8 Flash + 3.1 Pro + Gemini Spark Wrapper Closed-Loop Optimization
             </div>
           </div>
         </div>
@@ -318,6 +355,24 @@ export const ModelAdjustmentsCard: React.FC<ModelAdjustmentsCardProps> = ({
           </button>
 
           <button
+            onClick={() => setShowBioBuilderPipeline((prev) => !prev)}
+            className="px-2.5 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 rounded text-xs flex items-center gap-1 font-bold transition-colors cursor-pointer"
+            title="Autonomous 4-Stage Bio-Inspired Builder: Model Bio-Proposal -> Watchdog Gate -> Spark Agents Review -> The Builder"
+          >
+            <Hammer className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{showBioBuilderPipeline ? 'Hide Bio-Builder' : 'Bio-Builder (4 Stages)'}</span>
+          </button>
+
+          <button
+            onClick={() => setShowSparkHybridPipeline((prev) => !prev)}
+            className="px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 rounded text-xs flex items-center gap-1 font-medium transition-colors cursor-pointer"
+            title="Inspect GeminiSparkWrapper: Normalized Prompt -> 3.1-Pro Reasoning Trace -> 3.8-Flash Execution"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>{showSparkHybridPipeline ? 'Hide Spark Pipeline' : 'Spark Hybrid Pipeline'}</span>
+          </button>
+
+          <button
             onClick={() => setIsExpanded((prev) => !prev)}
             className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs flex items-center gap-1 font-medium transition-colors"
           >
@@ -335,6 +390,73 @@ export const ModelAdjustmentsCard: React.FC<ModelAdjustmentsCardProps> = ({
           </button>
         </div>
       </div>
+
+      {/* 4-Stage Autonomous Bio-Inspired Builder Pipeline */}
+      {showBioBuilderPipeline && (
+        <BioInspiredBuilderPipelinePanel
+          engine={engine}
+          activeTuning={activeTuning}
+          onApplyAdjustments={onApplyAdjustments}
+          onRunShadowTrial={onRunShadowTrial}
+          compact
+        />
+      )}
+
+      {/* GeminiSparkWrapper Hybrid Reasoning-Execution Pipeline Panel */}
+      {showSparkHybridPipeline && (
+        <div className="bg-slate-950/90 border border-amber-500/35 rounded-lg p-3 space-y-2.5 text-xs font-mono animate-in fade-in duration-150">
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+            <div className="flex items-center gap-2 text-amber-300 font-bold">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>
+                GeminiSparkWrapper Service • Projection Gain: {liveSparkPacket.projectionGainApplied.toFixed(1)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                Stage 2: {liveSparkPacket.reasoningModel} (Verdict: {liveSparkPacket.proReasoningTrace.stabilityVerdict})
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/40">
+                Stage 3: {liveSparkPacket.executionModel}
+              </span>
+              <button
+                onClick={() => onApplyAdjustments(liveSparkPacket.executionParameters)}
+                className="px-2.5 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold cursor-pointer transition-colors"
+              >
+                Execute 3.8-Flash Parameters
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+            <div className="p-2.5 rounded bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-sky-300 font-bold text-[11px]">
+                Stage 1: Normalized 5-Pillar Telemetry Prompt Envelope
+              </div>
+              <pre className="text-[10px] text-slate-300 whitespace-pre-wrap max-h-44 overflow-y-auto leading-relaxed">
+                {liveSparkPacket.normalizedPrompt}
+              </pre>
+            </div>
+            <div className="p-2.5 rounded bg-slate-900 border border-slate-800 space-y-1.5">
+              <div className="text-indigo-300 font-bold text-[11px]">
+                Stage 2 & 3: Injected 3.1-Pro Reasoning Trace → 3.8-Flash Execution
+              </div>
+              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                {liveSparkPacket.proReasoningTrace.reasoningSteps.map((step) => (
+                  <div key={step.step} className="p-1.5 rounded bg-slate-950 border border-slate-800/80">
+                    <div className="text-amber-300 font-semibold text-[10px]">
+                      Step {step.step}: {step.pillar}
+                    </div>
+                    <div className="text-slate-400 text-[10px] font-sans mt-0.5">
+                      {step.deduction}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Operator Guidance Active Banner if present */}
       {diagnostic.userGuidanceApplied && (

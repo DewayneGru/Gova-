@@ -127,6 +127,23 @@ export const NeuralTopologyCanvas: React.FC<NeuralTopologyCanvasProps> = ({
   const [quickPatchFeedback, setQuickPatchFeedback] = useState<string | null>(null);
   const [leakRefreshTick, setLeakRefreshTick] = useState<number>(0);
 
+  // Ring Topology Lateral Inhibition & Criticality Shunt Interactive States
+  const [isLateralRingEnabled, setIsLateralRingEnabled] = useState<boolean>(true);
+  const [isCriticalityShuntEnabled, setIsCriticalityShuntEnabled] = useState<boolean>(true);
+  const [lateralRingGainMv, setLateralRingGainMv] = useState<number>(1.45);
+
+  const handleToggleLateralRing = () => {
+    const next = !isLateralRingEnabled;
+    setIsLateralRingEnabled(next);
+    engineRef.current?.setLateralRingInhibitionEnabled(next);
+  };
+
+  const handleToggleCriticalityShunt = () => {
+    const next = !isCriticalityShuntEnabled;
+    setIsCriticalityShuntEnabled(next);
+    engineRef.current?.setCriticalityShuntEnabled(next);
+  };
+
   // Automated SNN Spike Synchronization State & Telemetry
   const [syncState, setSyncState] = useState({
     hz: 0,
@@ -543,6 +560,51 @@ export const NeuralTopologyCanvas: React.FC<NeuralTopologyCanvasProps> = ({
         ctx.shadowBlur = 0;
       }
 
+      // 4b. Render Distance-Decayed Lateral Ring Inhibition Arcs (Cortical Ring N8-N15)
+      const curLateralArcs = engineRef.current?.recentLateralRingArcs || [];
+      const curRingEnabled = engineRef.current ? engineRef.current.lateralRingInhibitionEnabled : true;
+      if (curRingEnabled && curLateralArcs.length > 0) {
+        const curSimTime = engineRef.current ? engineRef.current.simulationTime : 0;
+        for (let a = 0; a < curLateralArcs.length; a++) {
+          const arc = curLateralArcs[a];
+          const posFrom = neuronPositions.get(arc.preNeuronId);
+          const posTo = neuronPositions.get(arc.postNeuronId);
+          if (!posFrom || !posTo) continue;
+
+          const ageMs = curSimTime - arc.timestamp;
+          if (ageMs > 400 || ageMs < 0) continue;
+          const arcAlpha = Math.max(0.12, 1.0 - (ageMs / 400));
+
+          // Curved arc bulging based on ring distance
+          const midY = (posFrom.y + posTo.y) / 2;
+          const bulgeDir = arc.postNeuronId % 2 === 0 ? 1 : -1;
+          const bulgeOffset = bulgeDir * (26 + arc.distance * 12);
+          const cpx = posFrom.x + bulgeOffset;
+          const cpy = midY;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(posFrom.x, posFrom.y);
+          ctx.quadraticCurveTo(cpx, cpy, posTo.x, posTo.y);
+          ctx.strokeStyle = `rgba(168, 85, 247, ${arcAlpha * 0.85})`;
+          ctx.lineWidth = Math.max(1.0, 2.6 - arc.distance * 0.35);
+          ctx.setLineDash([4, 2]);
+          ctx.stroke();
+
+          // Action potential inhibitory wavefront dot
+          const pulseT = ((ageMs % 200) / 200);
+          const qx = (1 - pulseT) * (1 - pulseT) * posFrom.x + 2 * (1 - pulseT) * pulseT * cpx + pulseT * pulseT * posTo.x;
+          const qy = (1 - pulseT) * (1 - pulseT) * posFrom.y + 2 * (1 - pulseT) * pulseT * cpy + pulseT * pulseT * posTo.y;
+          ctx.beginPath();
+          ctx.arc(qx, qy, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(244, 63, 94, ${arcAlpha})`;
+          ctx.shadowColor = '#f43f5e';
+          ctx.shadowBlur = 4;
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
       // 5. Render Neuron Nodes with Pathway Leak Severity Rings & Isolation Highlights
       for (let i = 0; i < activeNeurons.length; i++) {
         const n = activeNeurons[i];
@@ -553,6 +615,33 @@ export const NeuralTopologyCanvas: React.FC<NeuralTopologyCanvasProps> = ({
         const isSelected = curSelectedNeuron === n.id;
         const vNorm = Math.max(0, Math.min(1.0, (n.vMem - n.vRest) / (n.vThresh - n.vRest)));
         const nodeLeak = leakSnapshot?.nodeLeakSeverities[n.id];
+        const isLaterallySuppressed = !!n.isLaterallySuppressed;
+        const isWTAWinner = engineRef.current?.lastWTAWinnerId === n.id;
+
+        // WTA Winner glowing emerald halo beacon
+        if (isWTAWinner && !isLaterallySuppressed) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, 23 + pulsePhase * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(16, 185, 129, ${0.80 + pulsePhase * 0.20})`;
+          ctx.lineWidth = 2.0;
+          ctx.shadowColor = '#10b981';
+          ctx.shadowBlur = 6;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // Laterally Suppressed node indicator (dampened shield / violet-rose dash ring)
+        if (isLaterallySuppressed) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, 18, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(244, 63, 94, 0.85)';
+          ctx.lineWidth = 1.8;
+          ctx.setLineDash([3, 2]);
+          ctx.stroke();
+          ctx.restore();
+        }
 
         // Pathway Leak Severity Halo around leaking nodes
         if (curShowLeakMap && nodeLeak && nodeLeak.severity !== 'nominal') {
@@ -789,6 +878,28 @@ export const NeuralTopologyCanvas: React.FC<NeuralTopologyCanvasProps> = ({
 
           <span className="text-slate-600">|</span>
           <button
+            onClick={handleToggleLateralRing}
+            className={`text-[10px] px-2 py-0.5 rounded transition cursor-pointer font-semibold ${
+              isLateralRingEnabled
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                : 'text-slate-400'
+            }`}
+            title="Toggle Ring Topology Distance-Decayed Lateral Inhibition & Winner-Take-All Gating"
+          >
+            Lateral Ring WTA
+          </button>
+          <button
+            onClick={handleToggleCriticalityShunt}
+            className={`text-[10px] px-2 py-0.5 rounded transition cursor-pointer font-semibold ${
+              isCriticalityShuntEnabled
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                : 'text-slate-400'
+            }`}
+            title="Toggle Excess Spike Shunting into Inhibitory Pool to lock Criticality (σ = 1.00)"
+          >
+            Criticality Shunt (σ=1.0)
+          </button>
+          <button
             onClick={() => setShowPathwayLeakHeatmap(!showPathwayLeakHeatmap)}
             className={`text-[10px] px-2 py-0.5 rounded transition cursor-pointer font-semibold ${
               showPathwayLeakHeatmap
@@ -829,21 +940,34 @@ export const NeuralTopologyCanvas: React.FC<NeuralTopologyCanvasProps> = ({
         {/* Bottom-left Multi-Tier Pathway Leak Legend Overlay on Canvas */}
         {showPathwayLeakHeatmap && (
           <div className="absolute bottom-2.5 left-2.5 flex flex-wrap items-center gap-3 bg-slate-950/90 backdrop-blur-md px-3 py-1.5 rounded-lg border border-slate-800 text-[10px] font-mono text-slate-300 shadow-md">
-            <span className="font-bold text-slate-200 uppercase tracking-wider">Leak Heatmap:</span>
+            <span className="font-bold text-slate-200 uppercase tracking-wider">Topology Map:</span>
             <span className="flex items-center gap-1 text-cyan-300">
               <span className="w-2.5 h-1 rounded bg-cyan-400" />
-              Nominal (Cyan)
+              Nominal
             </span>
             <span className="flex items-center gap-1 text-amber-300">
               <span className="w-2.5 h-1 rounded bg-amber-400" />
-              Moderate Leak (Amber)
+              Moderate Leak
             </span>
             <span className="flex items-center gap-1 text-rose-300">
               <span className="w-2.5 h-1 rounded bg-rose-500 animate-pulse" />
-              Critical Bleed (Pulsing Red)
+              Critical Bleed
             </span>
             <span className="text-slate-500">·</span>
-            <span className="text-sky-300">Click any node for Isolation Drill-Down & Quick Patch</span>
+            <span className="flex items-center gap-1 text-emerald-300">
+              <span className="w-2 h-2 rounded-full border border-emerald-400 bg-emerald-500/30" />
+              WTA Winner
+            </span>
+            <span className="flex items-center gap-1 text-rose-300">
+              <span className="w-2 h-2 rounded-full border border-rose-400 border-dashed bg-rose-500/20" />
+              Suppressed Node
+            </span>
+            <span className="flex items-center gap-1 text-purple-300">
+              <span className="w-2.5 h-0.5 rounded bg-purple-400" />
+              Ring Arc
+            </span>
+            <span className="text-slate-500">·</span>
+            <span className="text-sky-300">Click node for Isolation Drill-Down</span>
           </div>
         )}
       </div>

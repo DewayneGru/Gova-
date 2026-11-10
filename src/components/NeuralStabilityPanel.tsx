@@ -525,7 +525,7 @@ export const NeuralStabilityPanel: React.FC<NeuralStabilityPanelProps> = React.m
       </div>
 
       {/* Stability Metrics Key-Value Grid */}
-      <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] font-mono">
         <div className="bg-[#090d16] p-2.5 rounded-lg border border-slate-800 flex flex-col gap-0.5">
           <span className="text-slate-400 text-[10px] uppercase">Stability Index</span>
           <span className="text-emerald-400 text-sm font-bold flex items-center gap-1">
@@ -545,9 +545,29 @@ export const NeuralStabilityPanel: React.FC<NeuralStabilityPanelProps> = React.m
         </div>
 
         <div className="bg-[#090d16] p-2.5 rounded-lg border border-slate-800 flex flex-col gap-0.5">
-          <span className="text-slate-400 text-[10px] uppercase">Phase Synchrony (r)</span>
-          <span className={`text-sm font-bold flex items-center gap-1 ${isHighSynchrony ? 'text-rose-400' : 'text-purple-400'}`}>
+          <span className="text-slate-400 text-[10px] uppercase">Branching Ratio (σ)</span>
+          <span className="text-emerald-400 text-sm font-bold flex items-center gap-1">
+            <Gauge className="w-3.5 h-3.5" />
+            <span>{(telemetry.branchingRatio ?? 1.00).toFixed(3)}</span>
+          </span>
+          <span className="text-[10px] text-slate-500 font-sans">Criticality: 1.000 ± 0.02</span>
+        </div>
+
+        <div className="bg-[#090d16] p-2.5 rounded-lg border border-slate-800 flex flex-col gap-0.5">
+          <span className="text-slate-400 text-[10px] uppercase">Lateral Ring WTA</span>
+          <span className="text-purple-400 text-sm font-bold flex items-center gap-1">
             <Radio className="w-3.5 h-3.5" />
+            <span>{telemetry.lateralRingInhibition?.activeSuppressionEvents ?? 0} gated</span>
+          </span>
+          <span className="text-[10px] text-slate-500 font-sans">
+            {telemetry.suppressedNeuronIds?.length ?? 0} held nodes
+          </span>
+        </div>
+
+        <div className="bg-[#090d16] p-2.5 rounded-lg border border-slate-800 flex flex-col gap-0.5">
+          <span className="text-slate-400 text-[10px] uppercase">Phase Synchrony (r)</span>
+          <span className={`text-sm font-bold flex items-center gap-1 ${isHighSynchrony ? 'text-rose-400' : 'text-cyan-400'}`}>
+            <Cpu className="w-3.5 h-3.5" />
             <span>{synchronyIndex.toFixed(2)}</span>
           </span>
           <span className="text-[10px] text-slate-500 font-sans">Asynchronous: &lt;0.45</span>
@@ -564,14 +584,18 @@ export const NeuralStabilityPanel: React.FC<NeuralStabilityPanelProps> = React.m
       </div>
 
       {/* Model Assistance Invariant Badges */}
-      <div className="bg-[#070c18] border border-cyan-950/70 p-2 rounded-lg flex items-center justify-between text-[10px] font-mono text-cyan-300">
+      <div className="bg-[#070c18] border border-cyan-950/70 p-2 rounded-lg flex items-center justify-between flex-wrap gap-2 text-[10px] font-mono text-cyan-300">
         <span className="flex items-center gap-1">
           <Lock className="w-3 h-3 text-cyan-400" />
           <span>Hard-Locked Stability Plank: Active</span>
         </span>
+        <span className="flex items-center gap-1 text-emerald-400">
+          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+          <span>Criticality Lock: σ = 1.000</span>
+        </span>
         <span className="flex items-center gap-1 text-purple-300">
           <Globe className="w-3 h-3 text-purple-400" />
-          <span>Internet Research Grounding: ON</span>
+          <span>Lateral WTA Gating: ON</span>
         </span>
       </div>
 

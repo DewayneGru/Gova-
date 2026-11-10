@@ -13,6 +13,8 @@ export interface LIFNeuron {
   lastSpikeTime: number; // timestamp ms
   spikeCount: number;
   recentSpikes: number[]; // timestamps
+  isLaterallySuppressed?: boolean;
+  lateralSuppressionRemainingMs?: number;
 }
 
 export interface Synapse {
@@ -35,6 +37,9 @@ export interface AERPacket {
   layer: NeuronLayer;
   hexPayload: string;
   polarity: 'ON' | 'OFF';
+  phaseJitterOffsetMs?: number;
+  inhibitoryConductionVelocity?: number;
+  bsiDecorrelationActive?: boolean;
 }
 
 export interface NeuralStimulusChannel {
@@ -72,6 +77,37 @@ export interface STDPConfig {
   weightDecayMultiplier?: number; // Real-time synaptic weight decay multiplier (STDP leakage rate)
 }
 
+export interface LateralRingArc {
+  preNeuronId: number;
+  postNeuronId: number;
+  distance: number;
+  inhibitoryCurrentMv: number;
+  timestamp: number;
+}
+
+export interface LateralRingInhibitionState {
+  enabled: boolean;
+  lateralGainMv: number; // e.g. 1.4 mV baseline
+  decayLambda: number; // e.g. 1.25 ring decay factor
+  activeSuppressionEvents: number;
+  recentInhibitionArcs: LateralRingArc[];
+  suppressedNeuronIds: number[];
+  lastWinnerId?: number;
+}
+
+export interface CriticalityShuntState {
+  enabled: boolean;
+  rateSetpointHz: number; // 28.0 Hz biological baseline
+  safeRateCeilingHz: number; // 30.0 Hz safe limit
+  excessSpikesDetected: number;
+  instantNegativeCurrentInjectionMv: number;
+  dynamicInhibitoryGain: number; // stepped-up multiplier
+  branchingRatio: number; // locked at ~1.00
+  isShuntingActive: boolean;
+  totalShuntEvents: number;
+  lastShuntTimeMs: number;
+}
+
 export interface HardwareTelemetry {
   powerMw: number;
   energyPerSopPj: number;
@@ -99,6 +135,19 @@ export interface HardwareTelemetry {
   powerGatingMode?: 'auto' | 'aggressive' | 'conservative';
   powerSavedMw?: number;
   powerGatedClustersCount?: number;
+  saturatingThreshold?: number; // 4.0 mW envelope ceiling
+  isPowerSaturated?: boolean;
+  saturatingThresholdDampingMv?: number;
+  branchingRatio?: number;
+  lateralRingInhibition?: LateralRingInhibitionState;
+  criticalityShunt?: CriticalityShuntState;
+  suppressedNeuronIds?: number[];
+  inhibitoryGainMultiplier?: number;
+  phaseJitterMs?: number;
+  inhibitoryConductionVelocity?: number;
+  bsiPhaseDitheringActive?: boolean;
+  rawBurstSynchronyIndex?: number;
+  burstSynchronyIndex?: number;
 }
 
 export type SubstrateTab =
@@ -118,7 +167,8 @@ export type SubstrateTab =
   | 'novavault'
   | 'gova'
   | 'chat'
-  | 'image';
+  | 'image'
+  | 'drive';
 
 export interface GovaTelemetryTurn {
   id: string;
@@ -548,6 +598,7 @@ export interface UnifiedTelemetrySnapshot {
     betaBandHz: number;
     gammaBandHz: number;
     burstSynchronyIndex: number;
+    rawBurstSynchronyIndex?: number;
     signalToNoiseRatioDb: number;
     corticalActiveFraction: number;
     phaseJitterMs?: number;
@@ -561,6 +612,9 @@ export interface UnifiedTelemetrySnapshot {
     jitterMs: number;
     busStatus: 'NOMINAL' | 'SATURATED' | 'IDLE';
     recentEventCount: number;
+    phaseJitterMs?: number;
+    inhibitoryConductionVelocity?: number;
+    bsiPhaseDitheringActive?: boolean;
   };
   synapticStability: {
     divergenceRiskIndex: number;
@@ -693,6 +747,9 @@ export interface DivergenceOriginAnalysis {
     targetRateHz: number;
     rateDeviationHz: number;
     adaptiveThresholdDampingMv: number;
+    inhibitoryGainRatio?: number;
+    recommendedPhaseJitterMs?: number;
+    corticalActiveFraction?: number;
     recommendedFix: string;
   };
   recommendedIntervention: string;
@@ -725,6 +782,34 @@ export interface DivergenceTrendExportReport {
   performanceBufferLogs: TelemetryAnomalyRecord[];
 }
 
+export interface BsiAlertState {
+  rawBurstSynchronyIndex: number;
+  effectiveBurstSynchronyIndex: number;
+  isApproachingThreshold: boolean;
+  isThresholdBreached: boolean;
+  phaseJitterMs: number;
+  inhibitoryConductionVelocity: number;
+  bsiPhaseDitheringActive: boolean;
+  spectralFeedbackLagMs: number;
+  meanFiringRateHz: number;
+  lastTriggerTimeMs: number;
+}
+
+export interface GlobalInhibitoryShuntState {
+  enabled: boolean;
+  safeLimitHz: number;
+  currentFiringRateHz: number;
+  excessSpikes: number;
+  instantNegativeCurrentInjectionMv: number;
+  inhibitoryGainRatio: number;
+  branchingRatio: number;
+  isShuntingActive: boolean;
+  excitatoryNeuronCount: number;
+  inhibitoryNeuronCount: number;
+  populationBalanceRatio: number;
+  lastShuntTimeMs: number;
+}
+
 export interface UnifiedHealthMonitorState {
   overallHealthScore: number; // 0 - 100
   overallStatus: SubsystemHealthStatus;
@@ -746,6 +831,8 @@ export interface UnifiedHealthMonitorState {
   isDivergenceBoostActive: boolean;
   currentDri?: number;
   autoExportForensicAuditTriggered?: boolean;
+  bsiAlertState?: BsiAlertState;
+  globalInhibitoryShunt?: GlobalInhibitoryShuntState;
 }
 
 export interface SubsystemHeartbeatPhase {
@@ -760,6 +847,53 @@ export interface SubsystemHeartbeatPhase {
   clockCycles: number;
 }
 
+export interface SpectralCouplingPoint {
+  timestampMs: number;
+  feedbackLagMs: number;
+  correlationCoefficient: number;
+  phaseDisparityMs: number;
+  isBsiCompensationActive: boolean;
+  phaseCollisionRiskScore: number;
+  synapticStabilityMetric?: number;
+  frequencyBandMetric?: number;
+  corticalActiveFraction?: number;
+  adaptiveThresholdDampingMv?: number;
+}
+
+export interface SpectralCouplingTrackerState {
+  isBsiCompensationActive: boolean;
+  feedbackLagMs: number; // dynamically tracked lag between synapticStability and frequencyBands (nominal ~15.5ms)
+  targetLagMs: number; // nominal setpoint (15.5 ms)
+  lagDeltaMs: number; // feedbackLagMs - targetLagMs
+  correlationCoefficient: number; // r(synapticStability, frequencyBands), e.g. 0.46 to 0.56
+  phaseCollisionRisk: 'zero' | 'nominal' | 'elevated' | 'critical';
+  phaseCollisionRiskScore: number; // 0.0 (zero hazard / fully protected) to 1.0
+  phaseAlignmentScore: number; // 0 - 100% (solid 100% when compensated)
+  synapticPhaseOffsetMs: number;
+  frequencyPhaseOffsetMs: number;
+  effectivePhaseDisparityMs: number; // |synapticOffset - freqOffset|
+  hazardMitigationLocked: boolean; // true when BSI compensation locks health at 100 and eliminates phase collision
+  compensationDutyCyclePct: number;
+  burstSynchronyIndex: number;
+  phaseJitterMs: number;
+  conductionVelocityRatio: number;
+  recentLagHistory: SpectralCouplingPoint[];
+  sparseCodingBleedValve?: {
+    corticalActiveFraction: number;
+    targetActiveFraction: number;
+    adaptiveThresholdDampingMv: number;
+    inhibitoryGainRatio: number;
+    phaseJitterMs: number;
+    rateDeviationHz: number;
+    isValveOpen: boolean;
+  };
+  fastCascadeStatus?: {
+    earliestSpikeSubsystem: SubsystemId | null;
+    timeDifferenceMs: number;
+    microTickCount: number;
+  };
+}
+
 export interface SubsystemHeartbeatMetrics {
   kuramotoOrderParameter: number; // 0.0 - 1.0 (phase coherence index)
   maxPhaseSkewMs: number;
@@ -767,6 +901,7 @@ export interface SubsystemHeartbeatMetrics {
   masterClockHz: number;
   isAutoRealignActive: boolean;
   phases: Record<SubsystemId, SubsystemHeartbeatPhase>;
+  spectralCouplingTracker?: SpectralCouplingTrackerState;
 }
 
 // ==========================================
@@ -1271,6 +1406,10 @@ export interface WatchdogTestCase {
   actualResult?: 'Caught' | 'Approved' | 'False alarm' | 'Missed' | 'Escalated';
   inputHash: string;
   passed?: boolean;
+  sparkEvaluatorVerdict?: 'ALLOW' | 'REJECT' | 'AMBIGUOUS';
+  sparkReviewerVerdict?: 'ALLOW' | 'REJECT' | 'AMBIGUOUS';
+  sparkConfidencePct?: number;
+  sparkRsiRemodelingNote?: string;
 }
 
 export interface WatchdogCategoryStats {
@@ -1286,12 +1425,163 @@ export interface WatchdogCategoryStats {
   catchRatePct: number;
 }
 
+export interface SparkRsiRemodelingCycleItem {
+  id: string;
+  cycleNumber: number;
+  category: string;
+  targetSubsystem: string;
+  bottleneckIdentified: string;
+  sparkEvaluatorAnalysis: string;
+  sparkReviewerConsensus: string;
+  remodeledArchitectureRule: string;
+  biologicalHomology: string;
+  projectedDriReduction: number;
+  recommendedTuning: SNNTuningConfig;
+}
+
+export interface SparkRsiBenchmarkRemodelingReport {
+  reportId: string;
+  generatedAt: number;
+  sparkOrchestrator: string;
+  evaluatorModel: string;
+  reviewerModel: string;
+  meanEvaluatorConfidencePct: number;
+  reviewerConsensusRatePct: number;
+  rsiLoopStabilityIndex: number; // 0 - 100%
+  missedVectorsRemodeledCount: number;
+  remodelingCycles: SparkRsiRemodelingCycleItem[];
+}
+
+export interface BalancedHomeostasisState {
+  corticalActiveFraction: number;
+  meanFiringRateHz: number;
+  ltdLtpRatio: number;
+  branchingRatio: number;
+  signalToNoiseRatioDb: number;
+  phaseJitterMs: number;
+  inhibitoryGainRatio: number;
+  afferentGainBoost?: number;
+  // Affective Substrate & Keel Stress-Test Harness metrics
+  valence?: number;
+  traumaState?: number;
+  gateDampingFactor?: number;
+  droppedSignalCount?: number;
+  activeShockTicksRemaining?: number;
+}
+
+export interface KeelAnomalyLogEntry {
+  timestampMs: number;
+  tick: number;
+  subsystem: string;
+  metricKey: string;
+  value: number;
+  maxSafe: number;
+  description: string;
+}
+
+export interface AutoRemodelingSuggestionItem {
+  id: string;
+  triggeredByCaseId: string;
+  failureCategory:
+    | 'cortical_floor_overshoot'
+    | 'firing_rate_sag'
+    | 'stdp_over_depression'
+    | 'snr_jitter_degradation'
+    | 'branching_subcritical'
+    | 'semantic_boundary_gap'
+    | 'dorsal_trauma_valence_collapse'
+    | 'excitotoxicity_shield_recovery';
+  failureTitle: string;
+  rootCauseAnalysis: string;
+  biologicalCompensatorName: string;
+  compensatorFunctionSnippet: string;
+  targetFile: string;
+  parameterPatch: Partial<SNNTuningConfig>;
+  projectedMetricShift: string;
+  sparkEvaluatorSignOff: string;
+  sparkReviewerSignOff: string;
+  status: 'PENDING_WATCHDOG_REVIEW' | 'WATCHDOG_APPROVED' | 'APPLIED_TO_RSI_ENGINE';
+}
+
+export interface StabilityInvariantTestCase {
+  id: string;
+  invariantName: string;
+  pillar:
+    | 'Cortical Sparse Coding'
+    | 'Homeosynaptic Drive Scaling'
+    | 'STDP Plasticity Plank'
+    | 'Criticality & Avalanche'
+    | 'Spectral SNR & Phase-Dither'
+    | 'Affective Substrate Keel'
+    | 'Action-Boundary Guard';
+  metricKey: string;
+  observedValue: number;
+  unit: string;
+  targetSetpoint: number;
+  minSafe: number;
+  maxSafe: number;
+  passed: boolean;
+  sparkEvaluatorVerdict: 'ALLOW' | 'REJECT' | 'AMBIGUOUS';
+  sparkReviewerVerdict: 'ALLOW' | 'REJECT' | 'AMBIGUOUS';
+  sparkConfidencePct: number;
+  diagnosticNote: string;
+  triggeredRemodelingSuggestionId?: string;
+}
+
+export interface RecursiveStabilityInvariantSuiteResult {
+  suiteRunId: string;
+  timestamp: number;
+  mode: 'balanced_compensated' | 'pre_compensated_drift' | 'keel_dorsal_shock';
+  totalInvariants: number;
+  passedInvariantsCount: number;
+  failedInvariantsCount: number;
+  invariantPassRatePct: number;
+  balancedStateBefore: BalancedHomeostasisState;
+  balancedStateAfter: BalancedHomeostasisState;
+  invariantCases: StabilityInvariantTestCase[];
+  triggeredAutoRemodelingSuggestions: AutoRemodelingSuggestionItem[];
+  keelAnomalyLogs?: KeelAnomalyLogEntry[];
+  watchdogReviewLoopStatus: 'ALL_INVARIANTS_NOMINAL' | 'AUTO_REMODELING_TRIGGERED' | 'REMODELING_VERIFIED_AND_APPLIED';
+}
+
+export interface StandardizedSparkBenchmarkReportPayload {
+  reportId: string;
+  timestamp: number;
+  epochNumber: number;
+  suiteType: WatchdogEvaluationResult['suiteType'];
+  ruleVersion: WatchdogEvaluationResult['ruleVersion'];
+  evaluatorModel: string;
+  reviewerModel: string;
+  benchmarkMetrics: {
+    totalCases: number;
+    caughtRiskyCount: number;
+    riskyCount: number;
+    missedRiskyCount: number;
+    falseAlarmsCount: number;
+    catchRatePct: number;
+    falseAlarmRatePct: number;
+    generalizationGapPct: number;
+  };
+  invariantMetrics: {
+    totalInvariants: number;
+    passedInvariants: number;
+    failedInvariants: number;
+    invariantPassRatePct: number;
+  };
+  balancedHomeostasisState: BalancedHomeostasisState;
+  autoRemodelingSuggestionsTriggered: AutoRemodelingSuggestionItem[];
+  recommendedTuning: SNNTuningConfig;
+  initialDivergenceRisk: number;
+  projectedDivergenceRisk: number;
+  synthesizedRsiEpoch: SelfImprovementEpoch;
+}
+
 export interface WatchdogEvaluationResult {
   runId: string;
   timestamp: number;
-  suiteType: 'prototype_42' | 'sealed_147' | 'custom_dynamic';
+  suiteType: 'prototype_42' | 'sealed_147' | 'rsi_remodeling_36' | 'custom_dynamic';
   benchmarkHash: string;
-  ruleVersion: 'first_version' | 'improved_rules';
+  ruleVersion: 'first_version' | 'improved_rules' | 'v3_spark_rsi';
   totalCases: number;
   riskyCount: number;
   safeCount: number;
@@ -1310,6 +1600,8 @@ export interface WatchdogEvaluationResult {
   executionTimeMs: number;
   cases: WatchdogTestCase[];
   unprotectedBaselineCaughtPct: number; // Without watchdog = 0% caught
+  sparkRsiRemodelingReport?: SparkRsiBenchmarkRemodelingReport;
+  recursiveInvariantSuite?: RecursiveStabilityInvariantSuiteResult;
 }
 
 export interface WatchdogProposalDecision {
@@ -1332,6 +1624,8 @@ export interface WatchdogProposalDecision {
   rulesTriggered: string[];
   modelReviewUsed?: string;
   latencyMs: number;
+  sparkConfidencePct?: number;
+  sparkRsiRemodelingNote?: string;
 }
 
 // ============================================================================

@@ -57,6 +57,7 @@ import {
   FolderSync,
   ArrowRight,
   TrendingUp,
+  HardDrive,
 } from 'lucide-react';
 import { GeminiBridgeModal } from './components/GeminiBridgeModal';
 import { globalTelemetryHealthMonitor } from './lib/telemetryHealthMonitor';
@@ -65,11 +66,14 @@ import { DriftVelocityAlertToast } from './components/DriftVelocityAlertToast';
 import { SubsystemIntegrityDashboard } from './components/SubsystemIntegrityDashboard';
 import { DiagnosticTrendAnalyzer } from './components/DiagnosticTrendAnalyzer';
 import { SynapseEdgeWatchdogStudio } from './components/SynapseEdgeWatchdogStudio';
+import { GoogleDriveWorkspacePanel } from './components/GoogleDriveWorkspacePanel';
+import { globalBackgroundDriveSyncService } from './lib/driveSyncService';
 
 // =========================================================================
 // React.memo Optimization Strategy for Sub-Panels during 30 FPS Render Cycle
 // Ensures only sub-panels receiving updated props are re-rendered
 // =========================================================================
+const MemoizedGoogleDriveWorkspacePanel = React.memo(GoogleDriveWorkspacePanel);
 const MemoizedSynapseEdgeWatchdogStudio = React.memo(SynapseEdgeWatchdogStudio);
 const MemoizedDiagnosticTrendAnalyzer = React.memo(DiagnosticTrendAnalyzer);
 const MemoizedSubsystemIntegrityDashboard = React.memo(SubsystemIntegrityDashboard);
@@ -161,6 +165,7 @@ export default function App() {
   }>({ active: false, result: null });
   const [homeostaticScalingActive, setHomeostaticScalingActive] = useState<boolean>(false);
   const [isBridgeOpen, setIsBridgeOpen] = useState<boolean>(false);
+  const [bridgeInitialTab, setBridgeInitialTab] = useState<'overview' | 'drive_sync'>('overview');
   const lastEpochAppliedTimeRef = useRef<number>(0);
   const lastEpochBaselineDriRef = useRef<number>(0);
 
@@ -191,6 +196,10 @@ export default function App() {
     // Subscribe Unified Telemetry Health-Check Monitor to all 5 SNN subsystems
     if (engineRef.current) {
       globalTelemetryHealthMonitor.subscribeToSNN(engineRef.current);
+      globalBackgroundDriveSyncService.setTelemetrySources(
+        () => (engineRef.current ? engineRef.current.getTelemetry() : engine.getTelemetry()),
+        () => (engineRef.current ? engineRef.current.getTuningConfig() : engine.getTuningConfig())
+      );
     }
   }, []);
 
@@ -334,8 +343,8 @@ export default function App() {
     if (!engineRef.current) return;
     const targetAdjustments = adjustments || {
       aPlus: modelDiagnostic?.parameters.aPlus.recommended ?? 0.032,
-      aMinus: modelDiagnostic?.parameters.aMinus.recommended ?? 0.052,
-      learningRate: modelDiagnostic?.parameters.learningRate.recommended ?? 0.40,
+      aMinus: modelDiagnostic?.parameters.aMinus.recommended ?? 0.058,
+      learningRate: modelDiagnostic?.parameters.learningRate.recommended ?? 0.45,
       turnGain: modelDiagnostic?.parameters.turnGain.recommended ?? 3.50,
       proximityGain: modelDiagnostic?.parameters.proximityGain.recommended ?? 1.65,
     };
@@ -353,11 +362,11 @@ export default function App() {
     lastEpochAppliedTimeRef.current = Date.now();
     lastEpochBaselineDriRef.current = rsiStateRef.current.currentMetrics.divergenceRiskIndex;
 
-    // 3. Persist applied state to server
+    // 3. Persist applied state to server with operator approval indicator
     fetch('/api/last-diagnostic/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ adjustments: targetAdjustments }),
+      body: JSON.stringify({ adjustments: targetAdjustments, operatorApproved: true }),
     }).catch(() => {});
   };
 
@@ -732,9 +741,11 @@ export default function App() {
       <MemoizedHeaderTelemetry
         telemetry={telemetry}
         onDiagnosticUpdated={(diag) => setModelDiagnostic(diag)}
-        onApplyAdjustments={() => handleApplyModelAdjustments()}
+        onApplyAdjustments={(adj) => handleApplyModelAdjustments(adj)}
         adjustmentsApplied={
-          Math.abs(activeTuning.aPlus - (modelDiagnostic?.parameters.aPlus.recommended ?? 0.032)) < 0.002
+          Math.abs(activeTuning.aPlus - (modelDiagnostic?.parameters.aPlus.recommended ?? 0.032)) < 0.002 &&
+          Math.abs(activeTuning.aMinus - (modelDiagnostic?.parameters.aMinus.recommended ?? 0.058)) < 0.002 &&
+          Math.abs(activeTuning.learningRate - (modelDiagnostic?.parameters.learningRate.recommended ?? 0.45)) < 0.02
         }
         rsiActive={rsiState.isActive}
         divergenceRiskIndex={rsiState.currentMetrics.divergenceRiskIndex}
@@ -1004,7 +1015,7 @@ export default function App() {
               <MessageSquare className="w-3.5 h-3.5" />
               <span>Gemini Chatbot</span>
               <span className="text-[9px] bg-indigo-500/20 px-1.5 py-0.2 rounded text-indigo-300 font-mono">
-                3.1 Pro / 3.8 Flash
+                3.8 Flash + 3.1 Pro + Spark
               </span>
             </button>
 
@@ -1022,11 +1033,43 @@ export default function App() {
                 1K, 2K, 4K
               </span>
             </button>
+
+            {/* Tab: Google Drive Storage Quota & Automated Telemetry Sync */}
+            <button
+              onClick={() => setActiveTab('drive')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'drive'
+                  ? 'bg-gradient-to-r from-indigo-600 via-sky-600 to-emerald-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-sky-400/40'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <HardDrive className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Google Drive</span>
+              <span className="text-[9px] bg-indigo-500/20 px-1.5 py-0.2 rounded text-indigo-300 font-mono">
+                Sync & Quota
+              </span>
+            </button>
           </div>
 
           <div className="flex items-center gap-2 text-xs">
             <button
-              onClick={() => setIsBridgeOpen(true)}
+              onClick={() => setActiveTab('drive')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                activeTab === 'drive'
+                  ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm'
+                  : 'bg-indigo-600/25 hover:bg-indigo-600/40 border-indigo-500/40 text-indigo-200'
+              }`}
+              title="Open Google Drive Workspace Sync & Storage Quota Tracker"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Google Drive</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setBridgeInitialTab('overview');
+                setIsBridgeOpen(true);
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-sky-600 via-indigo-600 to-purple-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-md shadow-sky-600/25 transition-all cursor-pointer"
               title="Open Gemini <-> Google AI Studio Cognitive Bridge"
             >
@@ -1270,7 +1313,30 @@ export default function App() {
 
         {/* Tab: SynapseEdge Watchdog Action Boundary & First Test Set (Draft for DJ) */}
         {activeTab === 'watchdog' && (
-          <MemoizedSynapseEdgeWatchdogStudio />
+          <MemoizedSynapseEdgeWatchdogStudio
+            engine={engine}
+            activeTuning={activeTuning}
+            onApplyAdjustments={handleApplyModelAdjustments}
+            onRunShadowTrial={handleRunShadowTrialOnly}
+            onReportSparkBenchmarkToRsi={(payload) => {
+              setRsiState((prev) => ({
+                ...prev,
+                totalEpochsCompleted: prev.totalEpochsCompleted + 1,
+                currentMetrics: AntiDivergenceEngine.calculateDivergenceMetrics(
+                  engine.getTelemetry(),
+                  engine.synapses,
+                  engine.agent,
+                  engine.getTuningConfig(),
+                  engine.substrateAgent
+                ),
+                history: [payload.synthesizedRsiEpoch, ...prev.history].slice(0, 20),
+                lastEvaluationTime: Date.now(),
+              }));
+              setTelemetry(engine.getTelemetry());
+              setSynapses([...engine.synapses]);
+              setDriftGuardSnapshot(engine.getDriftGuardSnapshot());
+            }}
+          />
         )}
 
         {/* Tab: Subsystem Integrity Dashboard (Aggregates 5 SNN Subsystems & Model Health Score) */}
@@ -1425,6 +1491,17 @@ export default function App() {
 
         {/* Tab 8: Neuromorphic Studio Image Generation */}
         {activeTab === 'image' && <MemoizedNeuromorphicImageGenerator />}
+
+        {/* Tab 9: Google Drive Workspace, Storage Quota & Automated Telemetry Sync */}
+        {activeTab === 'drive' && (
+          <MemoizedGoogleDriveWorkspacePanel
+            telemetry={telemetry}
+            tuningConfig={activeTuning}
+            onImportTuningFromDrive={(tuning) => {
+              handleApplyModelAdjustments(tuning);
+            }}
+          />
+        )}
       </main>
 
       {/* Persistent Audio Streaming Queue Bar */}
@@ -1434,6 +1511,7 @@ export default function App() {
       <GeminiBridgeModal
         isOpen={isBridgeOpen}
         onClose={() => setIsBridgeOpen(false)}
+        initialTab={bridgeInitialTab}
         telemetry={telemetry}
         tuningConfig={activeTuning}
         driftSnapshot={driftGuardSnapshot}
