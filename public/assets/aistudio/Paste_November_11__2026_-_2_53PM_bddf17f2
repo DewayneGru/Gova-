@@ -1,0 +1,607 @@
+From f67b7b57ce6c2ceb1cef1d99eae126bc38074387 Mon Sep 17 00:00:00 2001
+From: DJ <dj@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 19:44:00 +0000
+Subject: [PATCH] governor: add Kuramoto order-parameter homeostasis; fix
+ benchmark and plotter; real measured results
+
+- update_coherence_homeostasis(): negative feedback on coupling K so r has a restoring force toward R_TARGET=0.48
+- state carries k_gain / r_error_integral; telemetry exports kuramoto_r_target and kuramoto_k_gain
+- benchmark_multiturn.py: warmup, truncate JSONL by default (--append to keep), --open-loop ablation, drop unused random, repo-root import path
+- plot_phase_portrait.py: draw latest point on top of the target marker
+- tests: 6 new; script-mode main block moved below all tests
+- scripts/README.md: protocol-matched loop-off vs loop-on numbers and limitations
+---
+ scripts/README.md              |  55 ++++++++++++
+ scripts/benchmark_multiturn.py | 139 +++++++++++++++++++++++++++++
+ scripts/plot_phase_portrait.py | 104 ++++++++++++++++++++++
+ synapse_governor.py            |  39 ++++++++
+ test_synapse_governor.py       | 157 +++++++++++++++++++++++++++++++--
+ 5 files changed, 485 insertions(+), 9 deletions(-)
+ create mode 100644 scripts/README.md
+ create mode 100644 scripts/benchmark_multiturn.py
+ create mode 100644 scripts/plot_phase_portrait.py
+
+diff --git a/scripts/README.md b/scripts/README.md
+new file mode 100644
+index 0000000..5403b20
+--- /dev/null
++++ b/scripts/README.md
+@@ -0,0 +1,55 @@
++# Governor scripts
++
++```bash
++python3 scripts/benchmark_multiturn.py            # 40 warmup turns, then 20 measured turns
++python3 scripts/benchmark_multiturn.py --append   # keep earlier JSONL lines (default: truncate)
++python3 scripts/benchmark_multiturn.py --open-loop  # ablation: coherence loop disabled, same protocol
++python3 scripts/plot_phase_portrait.py            # ASCII + PNG phase portrait of (sigma, r)
++python3 -m pytest -q test_synapse_governor.py
++```
++
++All numbers below were produced by running the code (base commit `6f3b3bd` + this patch).
++The traffic is deterministic, so a rerun reproduces them.
++
++## Coherence homeostasis
++
++Before this patch nothing acted on the Kuramoto order parameter `r`. The coupling `K` was about
++0.85-1.3, roughly ten times the critical coupling of the 16 oscillators, so `r` saturated near 1.0
++and `0.48` was only the initial value of a field. Now `K` is scaled by a gain updated each turn:
++
++```
++k_gain = K_BASE_GAIN - COHERENCE_KP * (r - R_TARGET)      clamped to [0.03, 0.30]
++```
++
++`r` above target weakens coupling (desynchronizing); `r` below target strengthens it. The integral
++term (`COHERENCE_KI`) is implemented but set to 0: on this slow plant it wound up and oscillated
++in a gain sweep. `K_BASE_GAIN` and `COHERENCE_KP` were tuned on this simulation by minimizing mean
++|r - 0.48| from three starting states (locked, dispersed, default).
++
++## Measured results
++
++Same protocol both columns (40 warmup turns, 20 measured turns); the left column is `--open-loop`.
++
++| Metric (20 measured turns) | Loop off | Loop on |
++|---|---|---|
++| Crowd r | 0.998 - 0.999 (pinned) | 0.481 - 0.614, mean 0.572 |
++| σ peak | 1.600 (T4, engine clamp ceiling) | 1.600 (T4, engine clamp ceiling) |
++| w_setpoint | 87.0, 88.0 after reward (+1.0), 87.5 after punish (-0.5) | 87.0, 90.0 after reward (+3.0), 88.9 after punish (-1.1) |
++
++With the loop on, the reward and punish pulses move `w_setpoint` about 2-3 times as far. A likely
++reason is that eligibility traces depend on phase state, which global synchrony flattens, but that
++mechanism has not been isolated here; only the effect is measured. An earlier run without warmup
++showed σ peak 1.521 and w_setpoint 87.0 -> 87.7 -> 87.4; those numbers are not comparable to the
++table above. `--open-loop --warmup 0` reproduces the pre-patch run exactly (σ peak 1.521 at T4, w_setpoint
++87.0 -> 87.7 -> 87.4), so the 1.521 vs 1.600 difference comes from the warmup, not the loop, and the
++open-loop path is behaviorally identical to the original code (guarded by a test).
++σ recovers to about 0.93-1.0 after each burst in both columns. From fully locked and
++fully dispersed starts, the loop moves `r` toward the target (see `test_coherence_loop_*`).
++
++## What this does and does not show
++
++- This is a software simulation of a 16-oscillator network. Nothing here is measured from hardware.
++- Cold start is slow: with `--warmup 0` the closed loop begins dispersed and `r` stays at 0.006-0.196
++  over the 20 turns, taking roughly 40 turns to reach the band. The table above is the settled regime.
++- `r` is bounded, not pinned: it stays within about 0.13 of the target here, with a mean error of 0.09.
++- Gains were tuned against this simulation's own traffic. Treat them as a working setpoint, not a result.
+diff --git a/scripts/benchmark_multiturn.py b/scripts/benchmark_multiturn.py
+new file mode 100644
+index 0000000..740e5e7
+--- /dev/null
++++ b/scripts/benchmark_multiturn.py
+@@ -0,0 +1,139 @@
++#!/usr/bin/env python3
++"""scripts/benchmark_multiturn.py
++
++Closed-loop stress test of the governor + return bridge + Kuramoto coherence homeostasis.
++
++Protocol: `--warmup` quiet turns let the coherence loop settle (not logged), then `--turns`
++measured turns inject two fluff bursts (T4, T11), concise-command phases (T7, T12, T13) and
++dopamine pulses (T8 reward, T14 punish). Traffic is deterministic, so runs are reproducible.
++
++Every number printed comes from executing synapse_governor.py; nothing is estimated.
++By default the time-series JSONL is truncated at start so runs do not compound; pass --append
++to keep earlier lines.
++"""
++
++import argparse
++from pathlib import Path
++import sys
++
++# Ensure the repository root is importable when invoked as `python3 scripts/...`
++sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
++
++import synapse_governor as governor_module  # noqa: E402
++from synapse_governor import (  # noqa: E402
++    R_TARGET,
++    REPORT_HISTORY_JSONL,
++    ArgonClosedLoopBridgeV2,
++    ArgonControlGovernorV2,
++    DopaminePlasticitySubstrate,
++    LLMResponseTelemetry,
++    TelemetryState,
++    export_telemetry_for_bridge,
++    strip_affirmation_fluff,
++)
++
++BENCHMARK_REPORT = Path("snn-divergence-correlation-report-benchmark.json")
++STANDARD = ("Standard Analytical Stream", "Coupled Kuramoto oscillators regulate dynamic range index drift via Heun RK2 integration.", 240, 0.60, 850.0)
++FLUFF = ("Supercritical Fluff Burst", "Certainly! That's a great question. SNN criticality is maintained across turns.", 920, 1.65, 2200.0)
++CONCISE = ("Concise Deterministic Cmd", "Telemetry state nominal across channels.", 32, 0.20, 410.0)
++
++
++def _traffic(turn: int):
++    if turn in (4, 11):
++        return FLUFF
++    if turn in (7, 12, 13):
++        return CONCISE
++    return STANDARD
++
++
++def run_benchmark(n_turns: int = 20, warmup: int = 40, append: bool = False, open_loop: bool = False) -> list:
++    # The --open-loop ablation swaps out one governor function; always restore it so an
++    # in-process open-loop run cannot silently turn later closed-loop runs into open-loop ones.
++    original = governor_module.update_coherence_homeostasis
++    try:
++        return _run_benchmark(n_turns, warmup, append, open_loop)
++    finally:
++        governor_module.update_coherence_homeostasis = original
++
++
++def _run_benchmark(n_turns: int, warmup: int, append: bool, open_loop: bool) -> list:
++    governor = ArgonControlGovernorV2(target_sigma=1.0)
++    bridge = ArgonClosedLoopBridgeV2(target_sigma=1.0, ltd_ltp_ratio=1.28)
++    dopamine = DopaminePlasticitySubstrate(decay_tau=0.85)
++    state = TelemetryState()
++    if open_loop:
++        # Ablation: pin the coupling multiplier at the original open-loop value (1.0).
++        governor_module.update_coherence_homeostasis = lambda r, integral: (1.0, 0.0)
++        state.k_gain = 1.0
++
++    for _ in range(warmup):  # settle the coherence loop on quiet traffic; not logged
++        max_tok = governor.compute_inference_hooks(state)["api_config"]["max_output_tokens"]
++        _, raw, tokens, entropy, lat = STANDARD
++        state = bridge.step_return_path(state, LLMResponseTelemetry(raw, tokens, max_tok, lat, entropy))
++
++    if not append:
++        REPORT_HISTORY_JSONL.write_text("", encoding="utf-8")
++
++    mode = "OPEN LOOP (coherence loop disabled)" if open_loop else "closed loop"
++    print(f"=== {n_turns}-Turn Neuromorphic Governance Benchmark ({mode}, warmup={warmup}, r target={R_TARGET}) ===\n")
++    print(f"{'Turn':<5} | {'Pre-σ':<6} | {'Temp':<6} | {'MaxTok':<6} | {'Repair':<14} | {'Post-σ':<6} | {'Crowd r':<8} | {'K gain':<7} | {'w_Setpt':<8} | Traffic Profile")
++    print("-" * 122)
++
++    rows = []
++    for turn in range(1, n_turns + 1):
++        hooks = governor.compute_inference_hooks(state)
++        temp = hooks["api_config"]["temperature"]
++        max_tok = hooks["api_config"]["max_output_tokens"]
++        pre_sigma = state.sigma
++
++        profile, raw_text, tokens, entropy, lat_ms = _traffic(turn)
++        cleaned = strip_affirmation_fluff(raw_text)
++        repair_action = "SURGICAL_STRIP" if cleaned != raw_text else "NONE"
++        sim_out = LLMResponseTelemetry(
++            output_text=raw_text if repair_action == "SURGICAL_STRIP" else cleaned,
++            tokens_generated=tokens, max_tokens_allowed=max_tok,
++            generation_latency_ms=lat_ms, mean_token_entropy=entropy,
++        )
++        state = bridge.step_return_path(state, sim_out)
++
++        note = ""
++        if turn == 8:
++            state, _ = dopamine.apply_reward_pulse(1.0, state)
++            note = " [REWARD +1.0]"
++        elif turn == 14:
++            state, _ = dopamine.apply_reward_pulse(-0.8, state)
++            note = " [PUNISH -0.8]"
++
++        export_telemetry_for_bridge(
++            state=state, history_turns=min(turn, 10), repair_action=repair_action,
++            measured_entropy=entropy, output_path=BENCHMARK_REPORT, append_jsonl=True,
++        )
++        rows.append((turn, state.sigma, state.active_crowd, state.k_gain, state.w_setpoint_int8))
++        print(
++            f"T{turn:<4} | {pre_sigma:<6.3f} | {temp:<6.3f} | {max_tok:<6} | {repair_action:<14} | "
++            f"{state.sigma:<6.3f} | {state.active_crowd:<8.3f} | {state.k_gain:<7.4f} | "
++            f"{state.w_setpoint_int8:<8.1f} | {profile}{note}"
++        )
++
++    rs = [r[2] for r in rows]
++    sig = [r[1] for r in rows]
++    print(
++        f"\nSummary: σ peak {max(sig):.3f} (T{sig.index(max(sig)) + 1}), "
++        f"r range {min(rs):.3f}-{max(rs):.3f}, mean r {sum(rs) / len(rs):.3f} (target {R_TARGET}), "
++        f"w_setpoint {rows[0][4]:.1f} -> {rows[-1][4]:.1f}"
++    )
++    return rows
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description="Multi-turn closed-loop governance benchmark")
++    parser.add_argument("--turns", type=int, default=20)
++    parser.add_argument("--warmup", type=int, default=40, help="quiet settling turns before measurement")
++    parser.add_argument("--append", action="store_true", help="keep existing JSONL lines instead of truncating")
++    parser.add_argument("--open-loop", action="store_true", help="ablation: disable the coherence loop (coupling pinned at 1.0)")
++    args = parser.parse_args()
++    run_benchmark(args.turns, args.warmup, args.append, args.open_loop)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/plot_phase_portrait.py b/scripts/plot_phase_portrait.py
+new file mode 100644
+index 0000000..47f28be
+--- /dev/null
++++ b/scripts/plot_phase_portrait.py
+@@ -0,0 +1,104 @@
++#!/usr/bin/env python3
++"""scripts/plot_phase_portrait.py
++
++Phase portrait of the homeostatic orbit from snn-telemetry-timeseries.jsonl:
++branching ratio (sigma) vs Kuramoto order parameter (r), against the target (1.00, 0.48).
++The r target is enforced by the coherence loop in synapse_governor.py (R_TARGET).
++"""
++
++import argparse
++import json
++from pathlib import Path
++from typing import List
++
++DEFAULT_JSONL = Path("snn-telemetry-timeseries.jsonl")
++SIGMA_TARGET, R_TARGET = 1.00, 0.48
++
++
++def load_timeseries(path: Path) -> List[dict]:
++    if not path.exists():
++        return []
++    records = []
++    with path.open("r", encoding="utf-8") as f:
++        for line in f:
++            line = line.strip()
++            if line:
++                try:
++                    records.append(json.loads(line))
++                except json.JSONDecodeError:
++                    continue
++    return records
++
++
++def render_ascii_phase_portrait(records: List[dict], width: int = 50, height: int = 18) -> str:
++    """X = branching ratio (0.6..1.6), Y = Kuramoto r (0.0..1.0). Latest point (★) is drawn on top."""
++    if not records:
++        return "No telemetry records found in time-series log."
++    min_x, max_x, min_y, max_y = 0.60, 1.60, 0.0, 1.0
++
++    def cell(sigma: float, r: float):
++        gx = max(0, min(width - 1, int(((sigma - min_x) / (max_x - min_x)) * (width - 1))))
++        gy = max(0, min(height - 1, int(((r - min_y) / (max_y - min_y)) * (height - 1))))
++        return gx, height - 1 - gy
++
++    grid = [[" " for _ in range(width)] for _ in range(height)]
++    for rec in records[:-1]:
++        gx, gy = cell(rec.get("sigma", 1.0), rec.get("r", R_TARGET))
++        grid[gy][gx] = "•"
++    tx, ty = cell(SIGMA_TARGET, R_TARGET)
++    grid[ty][tx] = "⊙"
++    last = records[-1]
++    lx, ly = cell(last.get("sigma", 1.0), last.get("r", R_TARGET))
++    grid[ly][lx] = "★"
++
++    border = "+" + "-" * width + "+"
++    lines = ["Kuramoto r ^", border]
++    lines += ["|" + "".join(row) + "|" for row in grid]
++    lines += [border, f"{min_x:.2f}" + " " * (width - 8) + f"{max_x:.2f} -> Branching Ratio (σ)"]
++    lines.append(f"Legend: ⊙ Target ({SIGMA_TARGET:.2f}, {R_TARGET:.2f}) | • Trajectory | ★ Latest")
++    return "\n".join(lines)
++
++
++def export_matplotlib_portrait(records: List[dict], output_png: Path) -> bool:
++    try:
++        import matplotlib.pyplot as plt
++    except ImportError:
++        print("[Plotter] matplotlib not installed; skipping PNG generation.")
++        return False
++    sigmas = [r.get("sigma", 1.0) for r in records]
++    rs = [r.get("r", R_TARGET) for r in records]
++    plt.figure(figsize=(9, 7), dpi=150)
++    plt.axvline(SIGMA_TARGET, color="gray", linestyle="--", alpha=0.5, label=f"Target σ={SIGMA_TARGET:.2f}")
++    plt.axhline(R_TARGET, color="gray", linestyle=":", alpha=0.5, label=f"Target r={R_TARGET:.2f}")
++    plt.plot(sigmas, rs, color="#3b82f6", alpha=0.4, linewidth=1.5, zorder=1)
++    sc = plt.scatter(sigmas, rs, c=range(1, len(records) + 1), cmap="viridis", s=45, edgecolors="black", linewidth=0.5, zorder=2)
++    plt.colorbar(sc, label="Turn")
++    plt.scatter([SIGMA_TARGET], [R_TARGET], color="red", marker="x", s=120, linewidth=2.5, label="Target", zorder=3)
++    plt.scatter([sigmas[-1]], [rs[-1]], color="#e11d48", marker="*", s=200, edgecolors="black", label="Latest", zorder=4)
++    plt.title("SNN Homeostatic Phase Portrait (simulation)", fontweight="bold")
++    plt.xlabel("Branching ratio σ")
++    plt.ylabel("Kuramoto order parameter r")
++    plt.xlim(0.60, 1.60)
++    plt.ylim(0.0, 1.0)
++    plt.grid(True, linestyle="--", alpha=0.3)
++    plt.legend(loc="upper right")
++    plt.tight_layout()
++    plt.savefig(output_png)
++    plt.close()
++    print(f"[Plotter] Saved phase portrait to {output_png.resolve()}")
++    return True
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description="Plot SNN homeostatic phase portrait")
++    parser.add_argument("-f", "--file", type=Path, default=DEFAULT_JSONL)
++    parser.add_argument("-o", "--output", type=Path, default=Path("phase_portrait.png"))
++    args = parser.parse_args()
++    records = load_timeseries(args.file)
++    print(render_ascii_phase_portrait(records))
++    if records:
++        export_matplotlib_portrait(records, args.output)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/synapse_governor.py b/synapse_governor.py
+index 528135b..d196ae9 100644
+--- a/synapse_governor.py
++++ b/synapse_governor.py
+@@ -17,6 +17,17 @@ STATE_FILE = Path("synapse_edge_state.json")
+ REPORT_LATEST_FILE = Path("snn-divergence-correlation-report-latest.json")
+ REPORT_HISTORY_JSONL = Path("snn-telemetry-timeseries.jsonl")
+ 
++# Kuramoto order-parameter homeostasis: negative feedback on coupling strength K.
++# Without this loop, K (~0.85-1.3) sits far above the critical coupling of the 16
++# oscillators (~0.1-0.2) and r saturates near 1.0, so r = 0.48 was never an attractor.
++R_TARGET = 0.48
++K_BASE_GAIN = 0.100        # feed-forward coupling multiplier measured to sit near r = R_TARGET
++COHERENCE_KP = 0.10        # proportional gain on (r - R_TARGET)
++COHERENCE_KI = 0.0         # integral gain; >0 wound up and oscillated on this slow plant (see PR notes)
++COHERENCE_I_MAX = 6.0      # anti-windup clamp on the error integral
++K_GAIN_MIN = 0.03          # floor on the coupling multiplier
++K_GAIN_MAX = 0.30          # ceiling on the coupling multiplier
++
+ FLUFF_AND_META_PATTERN = re.compile(
+     r"^(?:certainly|absolutely|great question|that's a great[^.!?]*|i'd be happy to[^.!?]*|"
+     r"sure thing|of course|you're right[^.!?]*|"
+@@ -53,6 +64,8 @@ class TelemetryState:
+     phases: List[float] = field(default_factory=_default_phases)
+     weights_int8: List[int] = field(default_factory=_default_weights_int8)
+     eligibility_traces: List[float] = field(default_factory=_default_eligibility)
++    k_gain: float = K_BASE_GAIN
++    r_error_integral: float = 0.0
+ 
+ 
+ @dataclass
+@@ -137,6 +150,22 @@ class DopaminePlasticitySubstrate:
+         return state, mean_shift
+ 
+ 
++def update_coherence_homeostasis(
++    r_measured: float, r_error_integral: float
++) -> tuple[float, float]:
++    """PI controller on the Kuramoto order parameter.
++
++    e = r - R_TARGET. If r is too high (over-synchronized) the coupling multiplier
++    falls (desynchronizing drive); if r is too low it rises (synchronizing drive).
++    Returns (k_gain, new_integral). The measured r is an input; the controller only
++    changes the coupling multiplier that the next simulation step uses.
++    """
++    error = r_measured - R_TARGET
++    integral = max(-COHERENCE_I_MAX, min(COHERENCE_I_MAX, r_error_integral + error))
++    k_gain = K_BASE_GAIN - COHERENCE_KP * error - COHERENCE_KI * integral
++    return max(K_GAIN_MIN, min(K_GAIN_MAX, k_gain)), integral
++
++
+ def step_kuramoto_and_int8_substrate_v3(
+     phases: List[float],
+     weights_int8: List[int],
+@@ -146,6 +175,7 @@ def step_kuramoto_and_int8_substrate_v3(
+     aer_jitter_ms: float = 0.46,
+     ltd_ltp_ratio: float = 1.28,
+     w_setpoint_int8: float = 87.0,
++    k_scale: float = 1.0,
+ ) -> tuple[List[float], List[int], float, float]:
+     n = len(phases)
+     drift = sigma - 1.0
+@@ -162,6 +192,7 @@ def step_kuramoto_and_int8_substrate_v3(
+         0.85
+         * (sigma + excitatory_drive + subcritical_pacemaker)
+         * jitter_whitening_gain
++        * k_scale
+     )
+ 
+     omegas = [0.15 * ((i / n) - 0.5) for i in range(n)]
+@@ -537,6 +568,8 @@ def export_telemetry_for_bridge(
+             "weight_mean_norm": state.w_mean_int8,
+             "weight_setpoint_int8": state.w_setpoint_int8,
+             "kuramoto_order_parameter_r": state.active_crowd,
++            "kuramoto_r_target": R_TARGET,
++            "kuramoto_k_gain": state.k_gain,
+             "aer_bus": {
+                 "latency_ms": state.aer_latency_ms,
+                 "jitter_ms": state.aer_jitter_ms,
+@@ -701,8 +734,12 @@ class ArgonClosedLoopBridgeV2:
+                 aer_jitter_ms=new_jitter,
+                 ltd_ltp_ratio=state.ltd_ltp_ratio,
+                 w_setpoint_int8=state.w_setpoint_int8,
++                k_scale=state.k_gain,
+             )
+         )
++        next_k_gain, next_r_integral = update_coherence_homeostasis(
++            active_crowd_r, state.r_error_integral
++        )
+ 
+         dopamine = DopaminePlasticitySubstrate()
+         new_traces = dopamine.step_eligibility_tags(
+@@ -743,4 +780,6 @@ class ArgonClosedLoopBridgeV2:
+             phases=new_phases,
+             weights_int8=new_weights_int8,
+             eligibility_traces=new_traces,
++            k_gain=round(next_k_gain, 4),
++            r_error_integral=round(next_r_integral, 4),
+         )
+diff --git a/test_synapse_governor.py b/test_synapse_governor.py
+index 6b14afe..a2da0d0 100644
+--- a/test_synapse_governor.py
++++ b/test_synapse_governor.py
+@@ -115,14 +115,153 @@ def test_streaming_affirmation_sentinel():
+     assert joined == "Spiking neural networks maintain criticality at sigma = 1.0."
+ 
+ 
++# --- Kuramoto order-parameter homeostasis -------------------------------------------------
++
++def _closed_loop_r(turns, phases=None):
++    from synapse_governor import ArgonControlGovernorV2
++
++    kwargs = {"phases": phases} if phases is not None else {}
++    state = TelemetryState(**kwargs)
++    governor = ArgonControlGovernorV2(target_sigma=1.0)
++    bridge = ArgonClosedLoopBridgeV2(target_sigma=1.0, ltd_ltp_ratio=1.28)
++    text = "Coupled Kuramoto oscillators regulate dynamic range index drift via Heun RK2 integration."
++    rs = []
++    for _ in range(turns):
++        max_tok = governor.compute_inference_hooks(state)["api_config"]["max_output_tokens"]
++        state = bridge.step_return_path(state, LLMResponseTelemetry(text, 240, max_tok, 850.0, 0.6))
++        rs.append(state.active_crowd)
++    return rs
++
++
++def test_coherence_controller_has_restoring_sign_and_bounds():
++    from synapse_governor import (
++        K_BASE_GAIN, K_GAIN_MAX, K_GAIN_MIN, R_TARGET, update_coherence_homeostasis,
++    )
++
++    k_hi, _ = update_coherence_homeostasis(R_TARGET + 0.4, 0.0)
++    k_lo, _ = update_coherence_homeostasis(R_TARGET - 0.4, 0.0)
++    k_at, _ = update_coherence_homeostasis(R_TARGET, 0.0)
++    assert k_hi < k_at < k_lo           # too synchronized -> weaker coupling; too dispersed -> stronger
++    assert abs(k_at - K_BASE_GAIN) < 1e-9
++    k_extreme, integral = update_coherence_homeostasis(50.0, 0.0)
++    assert K_GAIN_MIN <= k_extreme <= K_GAIN_MAX
++    assert abs(integral) <= 6.0         # anti-windup clamp
++
++
++def test_open_loop_coupling_saturates_without_homeostasis():
++    # Documents why the loop exists: at the old open-loop coupling, r pins near 1.0.
++    phases = [round((i * 0.32) % (2.0 * math.pi), 4) for i in range(16)]
++    weights = [87] * 16
++    r = 0.0
++    for _ in range(30):
++        phases, weights, r, _ = step_kuramoto_and_int8_substrate_v3(
++            phases, weights, 0.18, 1.0, k_scale=1.0
++        )
++    assert r > 0.95
++
++
++def test_coherence_loop_pulls_fully_locked_state_toward_target():
++    rs = _closed_loop_r(100, phases=[0.0] * 16)
++    assert rs[0] > 0.95
++    assert rs[-1] < 0.65                # driven out of lock by the feedback
++    assert sum(rs[-20:]) / 20 < 0.62
++
++
++def test_coherence_loop_lifts_dispersed_state_toward_target():
++    rs = _closed_loop_r(100, phases=[round(2 * math.pi * i / 16, 4) for i in range(16)])
++    assert rs[0] < 0.1
++    tail = sum(rs[60:]) / len(rs[60:])
++    assert 0.35 <= tail <= 0.65
++
++
++def test_benchmark_truncates_jsonl_by_default_and_appends_on_request(tmp_path: Path):
++    import subprocess
++    import sys
++
++    script = Path(__file__).resolve().parent / "scripts" / "benchmark_multiturn.py"
++    jsonl = tmp_path / "snn-telemetry-timeseries.jsonl"
++
++    def run(*extra):
++        subprocess.run(
++            [sys.executable, str(script), "--turns", "5", "--warmup", "0", *extra],
++            cwd=tmp_path, check=True, capture_output=True,
++        )
++        return len(jsonl.read_text().splitlines())
++
++    assert run() == 5
++    assert run() == 5                   # second run truncates instead of compounding
++    assert run("--append") == 10
++
++
++def test_benchmark_open_loop_flag_reproduces_phase_lock(tmp_path: Path):
++    import subprocess
++    import sys
++
++    script = Path(__file__).resolve().parent / "scripts" / "benchmark_multiturn.py"
++    subprocess.run(
++        [sys.executable, str(script), "--turns", "5", "--warmup", "15", "--open-loop"],
++        cwd=tmp_path, check=True, capture_output=True,
++    )
++    rows = [json.loads(line) for line in (tmp_path / "snn-telemetry-timeseries.jsonl").read_text().splitlines()]
++    assert all(row["r"] > 0.95 for row in rows)
++
++
++def test_benchmark_open_loop_does_not_leak_into_later_closed_loop_runs(tmp_path: Path, monkeypatch):
++    import importlib
++    import synapse_governor
++
++    monkeypatch.chdir(tmp_path)
++    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parent / "scripts"))
++    bm = importlib.import_module("benchmark_multiturn")
++    original = synapse_governor.update_coherence_homeostasis
++
++    open_rows = bm.run_benchmark(3, 15, False, True)
++    closed_rows = bm.run_benchmark(3, 15, False, False)
++
++    assert synapse_governor.update_coherence_homeostasis is original
++    assert all(row[2] > 0.95 for row in open_rows)
++    assert max(row[2] for row in closed_rows) < 0.9
++
++
++def test_open_loop_cold_start_reproduces_pre_patch_behavior(tmp_path: Path):
++    # Regression guard: with the coherence loop disabled and no warmup, the benchmark must give
++    # the same trajectory the governor produced before the loop existed.
++    import subprocess
++    import sys
++
++    script = Path(__file__).resolve().parent / "scripts" / "benchmark_multiturn.py"
++    subprocess.run(
++        [sys.executable, str(script), "--turns", "8", "--warmup", "0", "--open-loop"],
++        cwd=tmp_path, check=True, capture_output=True,
++    )
++    rows = [json.loads(line) for line in (tmp_path / "snn-telemetry-timeseries.jsonl").read_text().splitlines()]
++    assert rows[0]["r"] == 0.31
++    assert rows[3]["sigma"] == 1.521
++    assert rows[7]["r"] > 0.99
++
++
+ if __name__ == "__main__":
+     import tempfile
+-    test_subcritical_anti_starvation_rebound()
+-    test_kuramoto_rk2_jitter_stability()
+-    test_stacked_affirmation_stripping()
+-    test_lexical_entropy_dampening()
+-    test_3factor_dopamine_consolidation()
+-    with tempfile.TemporaryDirectory() as tmpdir:
+-        test_export_telemetry_for_bridge(Path(tmpdir))
+-    test_streaming_affirmation_sentinel()
+-    print("ALL 7 V3 MASTER INVARIANT TESTS PASSED.")
++
++    for _fn in (
++        test_subcritical_anti_starvation_rebound,
++        test_kuramoto_rk2_jitter_stability,
++        test_stacked_affirmation_stripping,
++        test_lexical_entropy_dampening,
++        test_3factor_dopamine_consolidation,
++        test_streaming_affirmation_sentinel,
++        test_coherence_controller_has_restoring_sign_and_bounds,
++        test_open_loop_coupling_saturates_without_homeostasis,
++        test_coherence_loop_pulls_fully_locked_state_toward_target,
++        test_coherence_loop_lifts_dispersed_state_toward_target,
++    ):
++        _fn()
++    for _fn in (
++        test_export_telemetry_for_bridge,
++        test_benchmark_truncates_jsonl_by_default_and_appends_on_request,
++        test_benchmark_open_loop_flag_reproduces_phase_lock,
++        test_open_loop_cold_start_reproduces_pre_patch_behavior,
++    ):
++        with tempfile.TemporaryDirectory() as tmpdir:
++            _fn(Path(tmpdir))
++    print("ALL 14 SCRIPT-MODE TESTS PASSED (the monkeypatch-based re-entrancy test runs under pytest only).")
+-- 
+2.43.0

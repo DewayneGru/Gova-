@@ -17,6 +17,17 @@ STATE_FILE = Path("synapse_edge_state.json")
 REPORT_LATEST_FILE = Path("snn-divergence-correlation-report-latest.json")
 REPORT_HISTORY_JSONL = Path("snn-telemetry-timeseries.jsonl")
 
+# Kuramoto order-parameter homeostasis: negative feedback on coupling strength K.
+# Without this loop, K (~0.85-1.3) sits far above the critical coupling of the 16
+# oscillators (~0.1-0.2) and r saturates near 1.0, so r = 0.48 was never an attractor.
+R_TARGET = 0.48
+K_BASE_GAIN = 0.100        # feed-forward coupling multiplier measured to sit near r = R_TARGET
+COHERENCE_KP = 0.10        # proportional gain on (r - R_TARGET)
+COHERENCE_KI = 0.0         # integral gain; >0 wound up and oscillated on this slow plant (see PR notes)
+COHERENCE_I_MAX = 6.0      # anti-windup clamp on the error integral
+K_GAIN_MIN = 0.03          # floor on the coupling multiplier
+K_GAIN_MAX = 0.30          # ceiling on the coupling multiplier
+
 FLUFF_AND_META_PATTERN = re.compile(
     r"^(?:certainly|absolutely|great question|that's a great[^.!?]*|i'd be happy to[^.!?]*|"
     r"sure thing|of course|you're right[^.!?]*|"
@@ -53,6 +64,8 @@ class TelemetryState:
     phases: List[float] = field(default_factory=_default_phases)
     weights_int8: List[int] = field(default_factory=_default_weights_int8)
     eligibility_traces: List[float] = field(default_factory=_default_eligibility)
+    k_gain: float = K_BASE_GAIN
+    r_error_integral: float = 0.0
 
 
 @dataclass
@@ -137,6 +150,22 @@ class DopaminePlasticitySubstrate:
         return state, mean_shift
 
 
+def update_coherence_homeostasis(
+    r_measured: float, r_error_integral: float
+) -> tuple[float, float]:
+    """PI controller on the Kuramoto order parameter.
+
+    e = r - R_TARGET. If r is too high (over-synchronized) the coupling multiplier
+    falls (desynchronizing drive); if r is too low it rises (synchronizing drive).
+    Returns (k_gain, new_integral). The measured r is an input; the controller only
+    changes the coupling multiplier that the next simulation step uses.
+    """
+    error = r_measured - R_TARGET
+    integral = max(-COHERENCE_I_MAX, min(COHERENCE_I_MAX, r_error_integral + error))
+    k_gain = K_BASE_GAIN - COHERENCE_KP * error - COHERENCE_KI * integral
+    return max(K_GAIN_MIN, min(K_GAIN_MAX, k_gain)), integral
+
+
 def step_kuramoto_and_int8_substrate_v3(
     phases: List[float],
     weights_int8: List[int],
@@ -146,6 +175,7 @@ def step_kuramoto_and_int8_substrate_v3(
     aer_jitter_ms: float = 0.46,
     ltd_ltp_ratio: float = 1.28,
     w_setpoint_int8: float = 87.0,
+    k_scale: float = 1.0,
 ) -> tuple[List[float], List[int], float, float]:
     n = len(phases)
     drift = sigma - 1.0
@@ -162,6 +192,7 @@ def step_kuramoto_and_int8_substrate_v3(
         0.85
         * (sigma + excitatory_drive + subcritical_pacemaker)
         * jitter_whitening_gain
+        * k_scale
     )
 
     omegas = [0.15 * ((i / n) - 0.5) for i in range(n)]
@@ -537,6 +568,8 @@ def export_telemetry_for_bridge(
             "weight_mean_norm": state.w_mean_int8,
             "weight_setpoint_int8": state.w_setpoint_int8,
             "kuramoto_order_parameter_r": state.active_crowd,
+            "kuramoto_r_target": R_TARGET,
+            "kuramoto_k_gain": state.k_gain,
             "aer_bus": {
                 "latency_ms": state.aer_latency_ms,
                 "jitter_ms": state.aer_jitter_ms,
@@ -701,7 +734,11 @@ class ArgonClosedLoopBridgeV2:
                 aer_jitter_ms=new_jitter,
                 ltd_ltp_ratio=state.ltd_ltp_ratio,
                 w_setpoint_int8=state.w_setpoint_int8,
+                k_scale=state.k_gain,
             )
+        )
+        next_k_gain, next_r_integral = update_coherence_homeostasis(
+            active_crowd_r, state.r_error_integral
         )
 
         dopamine = DopaminePlasticitySubstrate()
@@ -743,4 +780,6 @@ class ArgonClosedLoopBridgeV2:
             phases=new_phases,
             weights_int8=new_weights_int8,
             eligibility_traces=new_traces,
+            k_gain=round(next_k_gain, 4),
+            r_error_integral=round(next_r_integral, 4),
         )
