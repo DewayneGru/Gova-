@@ -1,84 +1,259 @@
 #!/usr/bin/env python3
-"""
-gemini_drive_bridge.py - Google Drive Shared Folder Sync for Gemini <-> AI Studio
+"""Google Drive Sync Bridge for SynapseEdge Governor State Snapshots.
 
-This script monitors a local Google Drive folder (e.g. ~/Google Drive/Google AI Studio)
-or synchronizes via the Google Drive API to push/pull 'context_bridge.json' and 'system_state.md'.
-
-Usage:
-    # 1. Sync local workspace with a local Google Drive sync folder:
-    python3 scripts/gemini_drive_bridge.py --drive-dir "~/Google Drive/AI Studio Sync"
-
-    # 2. Continuous watch mode (syncs both directions every 5 seconds):
-    python3 scripts/gemini_drive_bridge.py --drive-dir "~/Google Drive/AI Studio Sync" --watch
+Monitors local state snapshots, validates schema and policy digests
+against ControlledStateSnapshot and PreAuthorizedControlPolicy under
+shared POSIX advisory locks (fcntl.flock), and syncs verified state
+files to Google Drive atomically.
 """
 
-import os
-import sys
-import json
-import time
-import shutil
 import argparse
+import fcntl
+import hashlib
+import json
+import os
 from pathlib import Path
+import sys
+import time
+from typing import Any, Dict, Optional
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-LOCAL_MEMORY = ROOT_DIR / "workspace_memory.json"
-LOCAL_STATE = ROOT_DIR / "system_state.md"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-def sync_folders(drive_dir_path: Path):
-    """Bidirectional sync between local workspace and Google Drive folder."""
-    if not drive_dir_path.exists():
-        drive_dir_path.mkdir(parents=True, exist_ok=True)
-        print(f"[Drive Bridge] Created Drive sync directory at: {drive_dir_path}")
+from watchdog_policy_contract import (
+    ControlledStateSnapshot,
+    PreAuthorizedControlPolicy,
+)
 
-    drive_memory = drive_dir_path / "workspace_memory.json"
-    drive_state = drive_dir_path / "system_state.md"
+try:
+    import google.auth
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+except ImportError:
+    google = None
+    build = None
 
-    # Sync Memory File (Newer timestamp wins)
-    if LOCAL_MEMORY.exists() and drive_memory.exists():
-        local_mtime = LOCAL_MEMORY.stat().st_mtime
-        drive_mtime = drive_memory.stat().st_mtime
-        if drive_mtime > local_mtime + 1.0:
-            shutil.copy2(drive_memory, LOCAL_MEMORY)
-            print(f"[Drive Bridge] Pulled updated workspace memory from Google Drive ({time.strftime('%H:%M:%S')})")
-        elif local_mtime > drive_mtime + 1.0:
-            shutil.copy2(LOCAL_MEMORY, drive_memory)
-            print(f"[Drive Bridge] Pushed local workspace memory to Google Drive ({time.strftime('%H:%M:%S')})")
-    elif LOCAL_MEMORY.exists() and not drive_memory.exists():
-        shutil.copy2(LOCAL_MEMORY, drive_memory)
-        print(f"[Drive Bridge] Initialized Google Drive with local workspace memory ({time.strftime('%H:%M:%S')})")
-    elif not LOCAL_MEMORY.exists() and drive_memory.exists():
-        shutil.copy2(drive_memory, LOCAL_MEMORY)
-        print(f"[Drive Bridge] Restored local workspace memory from Google Drive ({time.strftime('%H:%M:%S')})")
+    class MediaFileUpload:  # type: ignore[no-redef]
+        def __init__(
+            self,
+            filename: str,
+            resumable: bool = True,
+            mimetype: str = "application/json",
+        ) -> None:
+            self.filename = filename
+            self.resumable = resumable
+            self.mimetype = mimetype
 
-    # Sync Human-Readable Markdown State
-    if LOCAL_STATE.exists():
-        shutil.copy2(LOCAL_STATE, drive_state)
 
-def main():
-    parser = argparse.ArgumentParser(description="Google Drive Sync for Gemini <-> AI Studio Bridge")
-    parser.add_argument("--drive-dir", "-d", type=str, default=str(Path.home() / "Google Drive" / "AI Studio Sync"),
-                        help="Path to local Google Drive folder")
-    parser.add_argument("--watch", "-w", action="store_true", help="Continuously sync every 5 seconds")
-    args = parser.parse_args()
+def compute_digest(filepath: Path) -> str:
+    """Computes SHA-256 digest of a file under shared advisory lock if a .lock exists."""
+    target = Path(filepath)
+    lock_path = target.with_suffix(target.suffix + ".lock")
+    sha256 = hashlib.sha256()
 
-    drive_dir = Path(os.path.expanduser(args.drive_dir)).resolve()
-    print("=" * 70)
-    print(" Google Drive <-> AI Studio Sync Bridge")
-    print(f" Local Applet: {ROOT_DIR}")
-    print(f" Target Drive Directory: {drive_dir}")
-    print("=" * 70)
+    if lock_path.exists():
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
+            try:
+                with open(target, "rb") as f:
+                    for chunk in iter(lambda: f.read(65536), b""):
+                        sha256.update(chunk)
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    else:
+        with open(target, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                sha256.update(chunk)
 
-    sync_folders(drive_dir)
+    return sha256.hexdigest()
 
-    if args.watch:
-        print("[Drive Bridge] Watching for bidirectional updates (Ctrl+C to quit)...")
+
+class DriveStateSyncBridge:
+    """Watches local governor state snapshots, validates schema/policy digest, and syncs to Google Drive."""
+
+    def __init__(
+        self,
+        watch_dir: Path,
+        target_folder_name: str = "AI Studio Sync",
+        service: Any = None,
+        policy: Optional[PreAuthorizedControlPolicy] = None,
+    ) -> None:
+        self.watch_dir = Path(watch_dir).expanduser()
+        self.target_folder_name = target_folder_name
+        self.policy = policy or PreAuthorizedControlPolicy()
+        self._folder_id: Optional[str] = None
+
+        if service is not None:
+            self.creds = None
+            self.project = None
+            self.service = service
+        elif google is not None and build is not None:
+            self.creds, self.project = google.auth.default()
+            self.service = build("drive", "v3", credentials=self.creds)
+        else:
+            raise RuntimeError(
+                "google-auth and google-api-python-client are required unless a Drive service is injected."
+            )
+
+    def _get_or_create_folder(self) -> str:
+        if self._folder_id:
+            return self._folder_id
+
+        query = (
+            f"name='{self.target_folder_name}' and "
+            "mimeType='application/vnd.google-apps.folder' and trashed=false"
+        )
+        response = (
+            self.service.files()
+            .list(q=query, spaces="drive", fields="files(id, name)")
+            .execute()
+        )
+        files = response.get("files", [])
+
+        if files:
+            self._folder_id = files[0]["id"]
+        else:
+            file_metadata = {
+                "name": self.target_folder_name,
+                "mimeType": "application/vnd.google-apps.folder",
+            }
+            folder = (
+                self.service.files()
+                .create(body=file_metadata, fields="id")
+                .execute()
+            )
+            self._folder_id = folder["id"]
+
+        return self._folder_id
+
+    def find_remote_file(self, filename: str, folder_id: str) -> Optional[str]:
+        query = (
+            f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+        )
+        response = (
+            self.service.files()
+            .list(q=query, spaces="drive", fields="files(id, name)")
+            .execute()
+        )
+        files = response.get("files", [])
+        return files[0]["id"] if files else None
+
+    def validate_snapshot_envelope(self, raw: Any) -> bool:
+        """Validates envelope structure, optional policy_digest, and ControlledStateSnapshot schema."""
+        if not isinstance(raw, dict) or "state" not in raw:
+            return False
+
+        if "policy_digest" in raw:
+            expected_digest = self.policy.policy_digest()
+            if raw["policy_digest"] != expected_digest:
+                return False
+
+        snap = ControlledStateSnapshot.from_dict(raw["state"])
+        snap.validate_types()
+        return True
+
+    def sync_file(self, local_path: Path) -> bool:
+        local_path = Path(local_path)
+        if not local_path.exists():
+            return False
+
+        lock_path = local_path.with_suffix(local_path.suffix + ".lock")
         try:
-            while True:
-                time.sleep(5)
-                sync_folders(drive_dir)
-        except KeyboardInterrupt:
-            print("\nDrive sync stopped.")
+            if lock_path.exists():
+                with open(lock_path, "a+", encoding="utf-8") as lock_file:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
+                    try:
+                        raw = json.loads(local_path.read_text(encoding="utf-8"))
+                    finally:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            else:
+                raw = json.loads(local_path.read_text(encoding="utf-8"))
+
+            if not self.validate_snapshot_envelope(raw):
+                print(
+                    f"[SyncBridge] Skipping {local_path.name}: Invalid state envelope or policy digest."
+                )
+                return False
+        except Exception as e:
+            print(
+                f"[SyncBridge] Skipping {local_path.name}: Malformed or invalid state JSON ({e})."
+            )
+            return False
+
+        folder_id = self._get_or_create_folder()
+        filename = local_path.name
+        remote_id = self.find_remote_file(filename, folder_id)
+
+        media = MediaFileUpload(
+            str(local_path), resumable=True, mimetype="application/json"
+        )
+
+        if remote_id:
+            self.service.files().update(
+                fileId=remote_id, media_body=media
+            ).execute()
+            print(f"[SyncBridge] Updated remote file: {filename}")
+        else:
+            file_metadata = {"name": filename, "parents": [folder_id]}
+            self.service.files().create(
+                body=file_metadata, media_body=media, fields="id"
+            ).execute()
+            print(f"[SyncBridge] Uploaded new remote file: {filename}")
+
+        return True
+
+    def scan_once(self, known_digests: Dict[str, str]) -> int:
+        """Performs a single directory scan pass and returns number of synced files."""
+        self.watch_dir.mkdir(parents=True, exist_ok=True)
+        synced_count = 0
+        for json_file in sorted(self.watch_dir.glob("*.json")):
+            if json_file.name.endswith(".lock") or ".tmp" in json_file.name:
+                continue
+            current_digest = compute_digest(json_file)
+            if known_digests.get(json_file.name) != current_digest:
+                print(
+                    f"[SyncBridge] Detected change in {json_file.name}. Syncing..."
+                )
+                if self.sync_file(json_file):
+                    known_digests[json_file.name] = current_digest
+                    synced_count += 1
+        return synced_count
+
+    def watch_loop(self, poll_interval_sec: float = 5.0) -> None:
+        print(f"[SyncBridge] Watching directory: {self.watch_dir}")
+        self.watch_dir.mkdir(parents=True, exist_ok=True)
+        known_digests: Dict[str, str] = {}
+
+        while True:
+            try:
+                self.scan_once(known_digests)
+            except Exception as e:
+                print(f"[SyncBridge] Error in sync loop: {e}")
+
+            time.sleep(poll_interval_sec)
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Sync local governor state snapshots to Google Drive."
+    )
+    parser.add_argument(
+        "--drive-dir",
+        type=str,
+        default="~/Google Drive/AI Studio Sync",
+        help="Local sync directory path",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=5.0,
+        help="Polling interval in seconds",
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Run continuous polling loop (default behavior)",
+    )
+    args = parser.parse_args()
+
+    bridge = DriveStateSyncBridge(watch_dir=Path(args.drive_dir))
+    bridge.watch_loop(poll_interval_sec=args.interval)

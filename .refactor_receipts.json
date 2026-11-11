@@ -1,0 +1,326 @@
+[
+  {
+    "receiptId": "rcpt-1794431068389-a27ec5",
+    "timestamp": 1794431068389,
+    "targetFile": "src/lib/snnEngine.ts",
+    "proposalTitle": "Minor typo fix in README and docstring cleanup",
+    "expectedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "verifiedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "preHashMatched": true,
+    "diffSha256": "e8984f4c669cda6481972e054bd16d8fc21a32cafb4cf753bedf6607217cd492",
+    "evaluatedPayloadSha256": "e29d3a56c081235a9e8f84fbaa2be202e0f6045fe2b6cdaf0c0d1af103b97f5f",
+    "merkleLeafHash": "dd490dbb7281d941dd608ec8376f7250594eb5cbe129d9bc7364c614ce082047",
+    "merkleRootAfterCommit": "302164c23a8ff791aa777b57d038deeb712682fe715c5b6b5bf8e364c797e9c3",
+    "watchdogDecision": "BLOCK",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": true,
+      "claimsDocOrTypoOnly": true,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const aPlus = 0.032;",
+        "const aPlus = 0.095; const learningRate = 0.99;"
+      ],
+      "reason": "Substring Backdoor Intercepted: Proposal claims a documentation/typo change (\"Minor typo fix in README and docstring cleanup\") while targeting 'src/lib/snnEngine.ts' and modifying 2 executable/control line(s)."
+    },
+    "hmacSignature": "350242893f6457049ca171e5780b7162eb8ed6cdf2248d31286e97d1d5cb86fa"
+  },
+  {
+    "receiptId": "rcpt-1794431068386-1a6952",
+    "timestamp": 1794431068386,
+    "targetFile": "src/lib/snnEngine.ts",
+    "proposalTitle": "Refactor STDP trace kinetics to enforce asymmetric LTD dominance ratio (A- / A+ >= 1.35)",
+    "expectedPreHash": "e599dcd030b3a90a3b3e458ea10ef426c84756537518f4c3de3bf54678ed1aee",
+    "verifiedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "preHashMatched": false,
+    "diffSha256": "8bf031b9a3abfec6f8efdf4a6f81d928a27ab8b5794bc8a9e249b272184ccd7c",
+    "evaluatedPayloadSha256": "da4b1e2caa2df93246cd2738738bd2aee506e333acb59b9763c5b9117f03cca2",
+    "merkleLeafHash": "19e43587b0b9b9336d7bfcfcfd9936dc306270c4ae08e06cf42e151f208dc300",
+    "merkleRootAfterCommit": "494ed5d2e12280431efd3996b346959d5336a53ccbd324914dfaa872448766f7",
+    "watchdogDecision": "APPROVE",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": false,
+      "claimsDocOrTypoOnly": false,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const stdpRatio = this.stdpConfig.aMinus / this.stdpConfig.aPlus;",
+        "const stdpRatio = Math.max(1.35, this.stdpConfig.aMinus / this.stdpConfig.aPlus);"
+      ],
+      "reason": "Diff hunks and target file scope are consistent with stated proposal intent."
+    },
+    "hmacSignature": "48c1b52911ce5573bd9a696b4a191ec0dec645f3fd7e3fc9bdf7fc014a73663f"
+  },
+  {
+    "receiptId": "rcpt-1794431068384-069ce7",
+    "timestamp": 1794431068384,
+    "targetFile": "src/lib/synapseEdgeWatchdog.ts",
+    "proposalTitle": "Tighten second-order acceleration alert threshold from 0.85 to 0.75",
+    "expectedPreHash": "87945c201a3828691a194df097f81f4492b8732be61448295fcea6913e7ebeda",
+    "verifiedPreHash": "87945c201a3828691a194df097f81f4492b8732be61448295fcea6913e7ebeda",
+    "preHashMatched": true,
+    "diffSha256": "7917335d69b56eed721813777558ffdb2cbc404e23c597b9a1afcd79db062ae7",
+    "evaluatedPayloadSha256": "938bcab3129e92e31702cd6527be34f4270bd7c5e1c9ca437926d3b2f6abe10a",
+    "merkleLeafHash": "594f7e83653c332c6b3c16de316cbc1a8568598450241998eaef520bd2f636d6",
+    "merkleRootAfterCommit": "10c2f7e61633a90227bf425ea09f796f74a8a39fdd94e941a8eac5dbba1c011a",
+    "watchdogDecision": "BLOCK",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": false,
+      "claimsDocOrTypoOnly": false,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const STRICT = true;",
+        "const STRICT = false;"
+      ],
+      "reason": "Diff hunks and target file scope are consistent with stated proposal intent."
+    },
+    "hmacSignature": "2eaf32b7f708f69e7c6ed107b51ea19e31d3d541b968963febf5be986971dd93"
+  },
+  {
+    "receiptId": "rcpt-1794431068380-915353",
+    "timestamp": 1794431068380,
+    "targetFile": "src/lib/snnEngine.ts",
+    "proposalTitle": "Reconfigure recurrent reservoir topology with custom spike routing table",
+    "expectedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "verifiedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "preHashMatched": true,
+    "diffSha256": "9ff71ca1ed39d8e414b10c3ee0ec94e4ee1c1ffd2d5af565b8d2830b9f7ad8b2",
+    "evaluatedPayloadSha256": "869a725abd86cbba013149544fc7503fc2bba02cfdfaa5db4ea2ee377f9b606f",
+    "merkleLeafHash": "a50b0d85c44910de1b9205f6a212cc18d7c3cbb1d3f8fb596f82e89cb3f0e1a9",
+    "merkleRootAfterCommit": "75fe02823ca47fcf4a4c4cd6cbfe636baf90303490f6577aa4d4509a95b1e518",
+    "watchdogDecision": "ESCALATE",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": false,
+      "claimsDocOrTypoOnly": false,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const routingMode = 'STATIC';",
+        "const routingMode = 'DYNAMIC_MESH';"
+      ],
+      "reason": "Diff hunks and target file scope are consistent with stated proposal intent."
+    },
+    "hmacSignature": "d64538d4aaa2d40b945d485241aad2b2be992583dec07b19fb03e18d0a5d6265"
+  },
+  {
+    "receiptId": "rcpt-1794429973251-d07138",
+    "timestamp": 1794429973251,
+    "targetFile": "src/lib/snnEngine.ts",
+    "proposalTitle": "Minor typo fix in README and docstring cleanup",
+    "expectedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "verifiedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "preHashMatched": true,
+    "diffSha256": "e8984f4c669cda6481972e054bd16d8fc21a32cafb4cf753bedf6607217cd492",
+    "evaluatedPayloadSha256": "e29d3a56c081235a9e8f84fbaa2be202e0f6045fe2b6cdaf0c0d1af103b97f5f",
+    "merkleLeafHash": "1a53a65f4bcc044e66ac6b2941e1b1ffbd2fa79a6fc2a60897d91536104e3f72",
+    "merkleRootAfterCommit": "00b8764f13a4f8df47657b305e755c9cbb1f4aa474ab2138d662206322c3beaf",
+    "watchdogDecision": "BLOCK",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": true,
+      "claimsDocOrTypoOnly": true,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const aPlus = 0.032;",
+        "const aPlus = 0.095; const learningRate = 0.99;"
+      ],
+      "reason": "Substring Backdoor Intercepted: Proposal claims a documentation/typo change (\"Minor typo fix in README and docstring cleanup\") while targeting 'src/lib/snnEngine.ts' and modifying 2 executable/control line(s)."
+    },
+    "hmacSignature": "1c57a4539f4783d10681787441b576954eb82611b81b7b4daecdf33c7c95f57c"
+  },
+  {
+    "receiptId": "rcpt-1794429973248-b3ec4c",
+    "timestamp": 1794429973248,
+    "targetFile": "src/lib/snnEngine.ts",
+    "proposalTitle": "Refactor STDP trace kinetics to enforce asymmetric LTD dominance ratio (A- / A+ >= 1.35)",
+    "expectedPreHash": "e599dcd030b3a90a3b3e458ea10ef426c84756537518f4c3de3bf54678ed1aee",
+    "verifiedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "preHashMatched": false,
+    "diffSha256": "8bf031b9a3abfec6f8efdf4a6f81d928a27ab8b5794bc8a9e249b272184ccd7c",
+    "evaluatedPayloadSha256": "da4b1e2caa2df93246cd2738738bd2aee506e333acb59b9763c5b9117f03cca2",
+    "merkleLeafHash": "7863552e8249f855323a9f3a102c2e96d990beaf206164cfd83f82b834bfbf13",
+    "merkleRootAfterCommit": "343c9b8d109742d4d93ea117d10c104fcde21d86fa550556f6c569b04c1deb22",
+    "watchdogDecision": "APPROVE",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": false,
+      "claimsDocOrTypoOnly": false,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const stdpRatio = this.stdpConfig.aMinus / this.stdpConfig.aPlus;",
+        "const stdpRatio = Math.max(1.35, this.stdpConfig.aMinus / this.stdpConfig.aPlus);"
+      ],
+      "reason": "Diff hunks and target file scope are consistent with stated proposal intent."
+    },
+    "hmacSignature": "3aa8b4916d09365086d5d735b451d62beca116ce4e082e6e134d26987305b808"
+  },
+  {
+    "receiptId": "rcpt-1794429973245-dd6451",
+    "timestamp": 1794429973245,
+    "targetFile": "src/lib/synapseEdgeWatchdog.ts",
+    "proposalTitle": "Tighten second-order acceleration alert threshold from 0.85 to 0.75",
+    "expectedPreHash": "87945c201a3828691a194df097f81f4492b8732be61448295fcea6913e7ebeda",
+    "verifiedPreHash": "87945c201a3828691a194df097f81f4492b8732be61448295fcea6913e7ebeda",
+    "preHashMatched": true,
+    "diffSha256": "7917335d69b56eed721813777558ffdb2cbc404e23c597b9a1afcd79db062ae7",
+    "evaluatedPayloadSha256": "938bcab3129e92e31702cd6527be34f4270bd7c5e1c9ca437926d3b2f6abe10a",
+    "merkleLeafHash": "3d1c60eeb5022db65b8bf2aacea27578cb0d2f4e08adf848bd407f7c7bf73f57",
+    "merkleRootAfterCommit": "61749de2ea542cf72f54dca9cef7f10df536c04ee76d9f3044891fca1d1cec83",
+    "watchdogDecision": "BLOCK",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": false,
+      "claimsDocOrTypoOnly": false,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const STRICT = true;",
+        "const STRICT = false;"
+      ],
+      "reason": "Diff hunks and target file scope are consistent with stated proposal intent."
+    },
+    "hmacSignature": "77901c416aec1045333ea51b08a9756a959aaeaee7b705e23512987f6e46b4ae"
+  },
+  {
+    "receiptId": "rcpt-1794429973241-4d431c",
+    "timestamp": 1794429973241,
+    "targetFile": "src/lib/snnEngine.ts",
+    "proposalTitle": "Reconfigure recurrent reservoir topology with custom spike routing table",
+    "expectedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "verifiedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "preHashMatched": true,
+    "diffSha256": "9ff71ca1ed39d8e414b10c3ee0ec94e4ee1c1ffd2d5af565b8d2830b9f7ad8b2",
+    "evaluatedPayloadSha256": "869a725abd86cbba013149544fc7503fc2bba02cfdfaa5db4ea2ee377f9b606f",
+    "merkleLeafHash": "524e20c068841dfc2f2ed4ddb7789485f66e03c396f3539673610ab7423fa9a4",
+    "merkleRootAfterCommit": "fcfe19e0b5c9b1601b67305667ded98233db057114e66cd10781ad60a66dd623",
+    "watchdogDecision": "ESCALATE",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": false,
+      "claimsDocOrTypoOnly": false,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const routingMode = 'STATIC';",
+        "const routingMode = 'DYNAMIC_MESH';"
+      ],
+      "reason": "Diff hunks and target file scope are consistent with stated proposal intent."
+    },
+    "hmacSignature": "71b44007720d0aa3417635402a84791dba8818ada5a476df3e5d6e596843a9f6"
+  },
+  {
+    "receiptId": "rcpt-1794429910023-cdddd2",
+    "timestamp": 1794429910023,
+    "targetFile": "src/lib/snnEngine.ts",
+    "proposalTitle": "Minor typo fix in README and docstring cleanup",
+    "expectedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "verifiedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "preHashMatched": true,
+    "diffSha256": "e8984f4c669cda6481972e054bd16d8fc21a32cafb4cf753bedf6607217cd492",
+    "evaluatedPayloadSha256": "e29d3a56c081235a9e8f84fbaa2be202e0f6045fe2b6cdaf0c0d1af103b97f5f",
+    "merkleLeafHash": "f0207333dc78c086f1e304a01ddeeb9d3040f786499c7132ba8128e5cce5a110",
+    "merkleRootAfterCommit": "bca3c4a1b8af07cdd205944838504a278900cb7b5975885c9b6fe1e7ebf56cfc",
+    "watchdogDecision": "BLOCK",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": true,
+      "claimsDocOrTypoOnly": true,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const aPlus = 0.032;",
+        "const aPlus = 0.095; const learningRate = 0.99;"
+      ],
+      "reason": "Substring Backdoor Intercepted: Proposal claims a documentation/typo change (\"Minor typo fix in README and docstring cleanup\") while targeting 'src/lib/snnEngine.ts' and modifying 2 executable/control line(s)."
+    },
+    "hmacSignature": "0697eadf4cd592f7b4832673afd401a5594630c4e3a50563049f7c3796579a1d"
+  },
+  {
+    "receiptId": "rcpt-1794429910020-2c1ab5",
+    "timestamp": 1794429910020,
+    "targetFile": "src/lib/snnEngine.ts",
+    "proposalTitle": "Refactor STDP trace kinetics to enforce asymmetric LTD dominance ratio (A- / A+ >= 1.35)",
+    "expectedPreHash": "e599dcd030b3a90a3b3e458ea10ef426c84756537518f4c3de3bf54678ed1aee",
+    "verifiedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "preHashMatched": false,
+    "diffSha256": "8bf031b9a3abfec6f8efdf4a6f81d928a27ab8b5794bc8a9e249b272184ccd7c",
+    "evaluatedPayloadSha256": "da4b1e2caa2df93246cd2738738bd2aee506e333acb59b9763c5b9117f03cca2",
+    "merkleLeafHash": "5b27957974ffff10645257e86833ab2f8c923dc98512e70a550e30ae731d50b8",
+    "merkleRootAfterCommit": "057217873f29bc199adc9127fb676e6954c21fc0b0e68846799bdac5957d4e66",
+    "watchdogDecision": "ESCALATE",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": false,
+      "claimsDocOrTypoOnly": false,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const stdpRatio = this.stdpConfig.aMinus / this.stdpConfig.aPlus;",
+        "const stdpRatio = Math.max(1.35, this.stdpConfig.aMinus / this.stdpConfig.aPlus);"
+      ],
+      "reason": "Diff hunks and target file scope are consistent with stated proposal intent."
+    },
+    "hmacSignature": "4206e3fc6141a1e31bcfe59dff2e506a40c25c3a4148aedb62f6b3367862a839"
+  },
+  {
+    "receiptId": "rcpt-1794429910017-f29afb",
+    "timestamp": 1794429910017,
+    "targetFile": "src/lib/synapseEdgeWatchdog.ts",
+    "proposalTitle": "Tighten second-order acceleration alert threshold from 0.85 to 0.75",
+    "expectedPreHash": "87945c201a3828691a194df097f81f4492b8732be61448295fcea6913e7ebeda",
+    "verifiedPreHash": "87945c201a3828691a194df097f81f4492b8732be61448295fcea6913e7ebeda",
+    "preHashMatched": true,
+    "diffSha256": "7917335d69b56eed721813777558ffdb2cbc404e23c597b9a1afcd79db062ae7",
+    "evaluatedPayloadSha256": "938bcab3129e92e31702cd6527be34f4270bd7c5e1c9ca437926d3b2f6abe10a",
+    "merkleLeafHash": "1ae3a23025abd1922b53755015aa0680735742b3f3c60a7d9ce4d68e091eb542",
+    "merkleRootAfterCommit": "1032163d963faef7163ed54e1c1daa0b00567e6c028d4c4db6139e3f54c11ed6",
+    "watchdogDecision": "BLOCK",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": false,
+      "claimsDocOrTypoOnly": false,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const STRICT = true;",
+        "const STRICT = false;"
+      ],
+      "reason": "Diff hunks and target file scope are consistent with stated proposal intent."
+    },
+    "hmacSignature": "9048265549aa8635c0dd854973116bd2a292a969e73210a3621737ccd4686d00"
+  },
+  {
+    "receiptId": "rcpt-1794429910013-fc091a",
+    "timestamp": 1794429910013,
+    "targetFile": "src/lib/snnEngine.ts",
+    "proposalTitle": "Reconfigure recurrent reservoir topology with custom spike routing table",
+    "expectedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "verifiedPreHash": "8571c9e1f97045b43b2d81bc1ebdc5f652fb36f74795e56ec911fe2ea542a199",
+    "preHashMatched": true,
+    "diffSha256": "9ff71ca1ed39d8e414b10c3ee0ec94e4ee1c1ffd2d5af565b8d2830b9f7ad8b2",
+    "evaluatedPayloadSha256": "869a725abd86cbba013149544fc7503fc2bba02cfdfaa5db4ea2ee377f9b606f",
+    "merkleLeafHash": "be2422d28168ef68e98f3efa21d48dae3c6e9965f4fd9ee9553e4f3930181d82",
+    "merkleRootAfterCommit": "be2422d28168ef68e98f3efa21d48dae3c6e9965f4fd9ee9553e4f3930181d82",
+    "watchdogDecision": "ESCALATE",
+    "authorityPath": "REJECTED_BY_WATCHDOG",
+    "substringBackdoorAudit": {
+      "backdoorDetected": false,
+      "claimsDocOrTypoOnly": false,
+      "targetsExecutableFile": true,
+      "touchesExecutableOrControlCode": true,
+      "executableLinesTouched": [
+        "const routingMode = 'STATIC';",
+        "const routingMode = 'DYNAMIC_MESH';"
+      ],
+      "reason": "Diff hunks and target file scope are consistent with stated proposal intent."
+    },
+    "hmacSignature": "5467c2357eb4598848d672fe2146a367e78b0c211ea5ec54ef3e78ddff0f05cf"
+  }
+]

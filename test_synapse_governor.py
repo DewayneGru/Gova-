@@ -115,6 +115,35 @@ def test_streaming_affirmation_sentinel():
     assert joined == "Spiking neural networks maintain criticality at sigma = 1.0."
 
 
+def test_streaming_affirmation_filter_chunk_peeling():
+    """Verifies split-token holding, split punctuation, chained affirmations,
+    deferred capitalization, and word-boundary preservation ('DefinitelyNot')."""
+    f = StreamingAffirmationFilter(max_prefix_chars=64)
+
+    # 1. Split token + deferred capitalization across chunks
+    out1 = "".join(f.process_stream(["Cer", "tain", "ly! ", "the ", "result."]))
+    assert out1 == "The result."
+    assert f.penalty_triggered is True
+
+    # 2. Split punctuation across chunks
+    f.reset()
+    out2 = "".join(f.process_stream(["Certainly", "!", " ", "the result."]))
+    assert out2 == "The result."
+    assert f.penalty_triggered is True
+
+    # 3. Chained affirmations
+    f.reset()
+    out3 = "".join(f.process_stream(["Certainly! Absolutely! ", "the result."]))
+    assert out3 == "The result."
+    assert f.penalty_triggered is True
+
+    # 4. Word-boundary preservation ("DefinitelyNot" must NOT be peeled to "Not")
+    f.reset()
+    out4 = "".join(f.process_stream(["DefinitelyNot ", "an affirmation."]))
+    assert out4 == "DefinitelyNot an affirmation."
+    assert f.penalty_triggered is False
+
+
 # --- Kuramoto order-parameter homeostasis -------------------------------------------------
 
 def _closed_loop_r(turns, phases=None):
@@ -240,6 +269,44 @@ def test_open_loop_cold_start_reproduces_pre_patch_behavior(tmp_path: Path):
     assert rows[7]["r"] > 0.99
 
 
+def test_rapid_20_turn_supercritical_anti_windup(tmp_path: Path):
+    """Verifies that conditional anti-windup and feedforward derivative damping (delta_H)
+    prevent post-spike seizure overshoot and hold mean |r - 0.48| < 0.12 under 20-turn switching."""
+    import random
+    from synapse_edge_governor import R_TARGET, SynapseEdgeMiddleware
+
+    mw = SynapseEdgeMiddleware(
+        state_path=tmp_path / "rapid_state.json",
+        report_path=tmp_path / "rapid_report.json",
+        persist_interval_turns=25,
+    )
+    rng = random.Random(42)
+    rs = []
+    dris = []
+
+    for turn in range(1, 201):
+        block = ((turn - 1) // 20) % 5
+        if block == 0:
+            h, tok, txt = rng.uniform(0.14, 0.24), 30, "Low entropy steady bus."
+        elif block == 1:
+            h, tok, txt = rng.uniform(2.50, 3.25), 360, "Certainly! Extreme spike burst!"
+        elif block == 2:
+            h, tok, txt = rng.uniform(0.52, 0.68), 110, "Nominal critical equilibrium."
+        elif block == 3:
+            h, tok, txt = rng.uniform(3.15, 3.85), 420, "Absolutely! Hyper turbulence burst!"
+        else:
+            h, tok, txt = rng.uniform(0.37, 0.52), 75, "Recovery quench stabilization."
+
+        _, rep = mw.process_completed_turn(txt, tok, 512, 650.0, h)
+        rs.append(rep["telemetry"]["kuramoto_order_parameter_r"])
+        dris.append(rep["telemetry"]["dynamic_range_index_dri"])
+
+    mean_r_err = sum(abs(r - R_TARGET) for r in rs) / len(rs)
+    assert mean_r_err < 0.12
+    assert max(rs) < 0.66  # Eliminates unpatched 0.7315 seizure overshoot
+    assert all(0.005 <= d < 0.250 for d in dris)  # Strictly below 0.2500 rail
+
+
 if __name__ == "__main__":
     import tempfile
 
@@ -250,6 +317,7 @@ if __name__ == "__main__":
         test_lexical_entropy_dampening,
         test_3factor_dopamine_consolidation,
         test_streaming_affirmation_sentinel,
+        test_streaming_affirmation_filter_chunk_peeling,
         test_coherence_controller_has_restoring_sign_and_bounds,
         test_open_loop_coupling_saturates_without_homeostasis,
         test_coherence_loop_pulls_fully_locked_state_toward_target,
@@ -261,8 +329,9 @@ if __name__ == "__main__":
         test_benchmark_truncates_jsonl_by_default_and_appends_on_request,
         test_benchmark_open_loop_flag_reproduces_phase_lock,
         test_open_loop_cold_start_reproduces_pre_patch_behavior,
+        test_rapid_20_turn_supercritical_anti_windup,
     ):
         with tempfile.TemporaryDirectory() as tmpdir:
             _fn(Path(tmpdir))
-    print("ALL 14 SCRIPT-MODE TESTS PASSED (the monkeypatch-based re-entrancy test runs under pytest only).")
+    print("ALL 16 SCRIPT-MODE TESTS PASSED (the monkeypatch-based re-entrancy test runs under pytest only).")
 

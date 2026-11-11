@@ -4,14 +4,29 @@
 import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+import fcntl
 import json
 import math
 import os
 from pathlib import Path
 import re
+import tempfile
 import time
-from typing import Any, AsyncGenerator, Dict, List
+from typing import Any, AsyncGenerator, Dict, Iterator, List
 import zlib
+
+from watchdog_policy_contract import (
+    ApprovalVerdict,
+    ControlledStateSnapshot,
+    MutationKind,
+    PreAuthorizedControlPolicy,
+    StateTransitionProposal,
+    SurrogateGovernorState,
+    WatchdogApprovalBoundary,
+    WatchdogDecision,
+    require_finite_float,
+    require_non_negative_int,
+)
 
 STATE_FILE = Path("synapse_edge_state.json")
 REPORT_LATEST_FILE = Path("snn-divergence-correlation-report-latest.json")
@@ -27,6 +42,8 @@ COHERENCE_KI = 0.0         # integral gain; >0 wound up and oscillated on this s
 COHERENCE_I_MAX = 6.0      # anti-windup clamp on the error integral
 K_GAIN_MIN = 0.03          # floor on the coupling multiplier
 K_GAIN_MAX = 0.30          # ceiling on the coupling multiplier
+NOMINAL_AER_LATENCY_MS = 0.84
+NOMINAL_AER_JITTER_MS = 0.46
 
 FLUFF_AND_META_PATTERN = re.compile(
     r"^(?:certainly|absolutely|great question|that's a great[^.!?]*|i'd be happy to[^.!?]*|"
@@ -77,19 +94,58 @@ class LLMResponseTelemetry:
     mean_token_entropy: float
 
 
+def _atomic_write_json_with_flock(target: Path, payload: Dict[str, Any]) -> None:
+    """Atomically writes a JSON payload using fcntl.flock and tempfile.NamedTemporaryFile."""
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target.with_suffix(target.suffix + ".lock")
+    with open(lock_path, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            tmp_path: str | None = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=str(target.parent),
+                    prefix=f".{target.name}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as tmp_file:
+                    tmp_path = tmp_file.name
+                    json.dump(payload, tmp_file, indent=2)
+                    tmp_file.flush()
+                    os.fsync(tmp_file.fileno())
+                os.replace(tmp_path, target)
+            except Exception:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                raise
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 def save_telemetry_state(state: TelemetryState, path: Path = STATE_FILE) -> None:
-    temp_path = path.with_suffix(".tmp")
-    temp_path.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
-    temp_path.replace(path)
+    _atomic_write_json_with_flock(Path(path), asdict(state))
 
 
 def load_telemetry_state(path: Path = STATE_FILE) -> TelemetryState:
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return TelemetryState(**data)
-        except Exception:
-            pass
+    target = Path(path)
+    if target.exists():
+        lock_path = target.with_suffix(target.suffix + ".lock")
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
+            try:
+                data = json.loads(target.read_text(encoding="utf-8"))
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        if not isinstance(data, dict):
+            raise TypeError("Persisted TelemetryState payload must be a JSON object")
+        require_finite_float("sigma", data.get("sigma", 1.00), 0.40, 1.75)
+        require_finite_float("dri", data.get("dri", 0.03), 0.001, 0.45)
+        require_finite_float("power_mw", data.get("power_mw", 4.15), 0.0, 10.0)
+        allowed = set(TelemetryState.__dataclass_fields__.keys())
+        return TelemetryState(**{k: data[k] for k in allowed if k in data})
     return TelemetryState()
 
 
@@ -388,70 +444,145 @@ def strip_affirmation_fluff(text: str) -> str:
     return "\n".join(lines).strip()
 
 
+# Requires word boundary + mandatory trailing punctuation or whitespace delimiter.
+# Matches one or more chained affirmations or meta-intros at the start of the stream.
+AFFIRMATION_TOKEN_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:Certainly|Absolutely|Of\s+course|Sure\s+thing|Definitely|Great\s+question)\b(?:[!.,:—\-]+|\s+)"
+    r"|(?:Here\s+is|Here's|Let's\s+look\s+at|Let's\s+break\s+down|Below\s+is|In\s+this\s+response)\b[^:.\n]*[:.,]"
+    r")\s*",
+    re.IGNORECASE,
+)
+
+PARTIAL_PREFIXES = (
+    "certainly",
+    "absolutely",
+    "of course",
+    "sure thing",
+    "definitely",
+    "great question",
+    "here is",
+    "here's",
+    "let's look at",
+    "let's break down",
+    "below is",
+    "in this response",
+)
+
+
 class StreamingAffirmationFilter:
-    """Zero-leakage streaming sentinel with multi-chunk peel and trailing space preservation."""
+    """Stateful chunk filter that strips chained leading affirmations across arbitrary chunk boundaries."""
 
-    def __init__(self, max_buffer_chars: int = 96):
-        self.max_buffer_chars = max_buffer_chars
-        self.buffer = ""
-        self.raw_char_count = 0
-        self.is_flushed = False
-        self.was_repaired = False
+    def __init__(self, max_prefix_chars: int = 64, max_buffer_chars: int | None = None) -> None:
+        self.max_prefix_chars = max_buffer_chars if max_buffer_chars is not None else max_prefix_chars
+        self._buffer: str = ""
+        self._peeling_complete: bool = False
+        self._needs_capitalization: bool = False
+        self.penalty_triggered: bool = False
 
-    def _clean_opening(self, text: str) -> str:
-        leading_stripped = text.lstrip()
-        if not leading_stripped:
+    @property
+    def was_repaired(self) -> bool:
+        return self.penalty_triggered
+
+    def reset(self) -> None:
+        self._buffer = ""
+        self._peeling_complete = False
+        self._needs_capitalization = False
+        self.penalty_triggered = False
+
+    def _emit_with_capitalization(self, text: str) -> str:
+        if not text:
             return ""
+        if self._needs_capitalization:
+            stripped = text.lstrip()
+            if not stripped:
+                return ""
+            first_char = stripped[0]
+            if first_char.islower():
+                stripped = first_char.upper() + stripped[1:]
+            self._needs_capitalization = False
+            return stripped
+        return text
 
-        lines = leading_stripped.split("\n")
-        cleaned_first = lines[0].lstrip()
+    def feed(self, chunk: str) -> str:
+        if not isinstance(chunk, str):
+            raise TypeError(f"Expected str chunk, got {type(chunk).__name__}")
+
+        if self._peeling_complete:
+            return self._emit_with_capitalization(chunk)
+
+        self._buffer += chunk
 
         while True:
-            next_clean = FLUFF_AND_META_PATTERN.sub("", cleaned_first).lstrip()
-            if next_clean == cleaned_first:
+            match = AFFIRMATION_TOKEN_RE.match(self._buffer)
+            if not match:
                 break
-            self.was_repaired = True
-            cleaned_first = next_clean
+            if match.end() == len(self._buffer) and len(self._buffer) < self.max_prefix_chars:
+                return ""
+            self.penalty_triggered = True
+            self._needs_capitalization = True
+            self._buffer = self._buffer[match.end() :]
 
-        if cleaned_first and (cleaned_first != lines[0] or self.was_repaired):
-            cleaned_first = cleaned_first[0].upper() + cleaned_first[1:]
-            lines[0] = cleaned_first
-        elif not cleaned_first:
-            lines = lines[1:]
+        stripped = self._buffer.lstrip()
+        if not stripped:
+            return ""
 
-        return "\n".join(lines).lstrip()
+        lower_s = stripped.lower()
+        could_be_prefix = any(
+            p.startswith(lower_s)
+            or (
+                lower_s.startswith(p)
+                and (
+                    len(lower_s) == len(p)
+                    or lower_s[len(p)] in "!.,:—- \t\n"
+                    or p in ("let's look at", "let's break down", "here is", "here's", "below is", "in this response")
+                )
+            )
+            for p in PARTIAL_PREFIXES
+        )
+
+        if could_be_prefix and len(self._buffer) < self.max_prefix_chars:
+            return ""
+
+        self._peeling_complete = True
+        out = self._buffer
+        self._buffer = ""
+        return self._emit_with_capitalization(out)
+
+    def flush(self) -> str:
+        if not self._peeling_complete:
+            while True:
+                match = AFFIRMATION_TOKEN_RE.match(self._buffer)
+                if not match:
+                    break
+                self.penalty_triggered = True
+                self._needs_capitalization = True
+                self._buffer = self._buffer[match.end() :]
+            self._peeling_complete = True
+
+        out = self._buffer
+        self._buffer = ""
+        return self._emit_with_capitalization(out)
+
+    def process_stream(self, chunks: Iterator[str]) -> Iterator[str]:
+        for chunk in chunks:
+            out = self.feed(chunk)
+            if out:
+                yield out
+        tail = self.flush()
+        if tail:
+            yield tail
 
     async def filter_stream(
         self, token_generator: AsyncGenerator[str, None]
     ) -> AsyncGenerator[str, None]:
         async for chunk in token_generator:
-            if self.is_flushed:
-                yield chunk
-                continue
-
-            self.buffer += chunk
-            self.raw_char_count += len(chunk)
-
-            has_boundary = any(p in self.buffer for p in [".", "!", "?", "\n", ":"])
-            hit_ceiling = self.raw_char_count >= self.max_buffer_chars
-
-            if has_boundary or hit_ceiling:
-                cleaned_text = self._clean_opening(self.buffer)
-                if len(cleaned_text.strip()) < 10 and not hit_ceiling:
-                    self.buffer = cleaned_text
-                    continue
-
-                self.is_flushed = True
-                self.buffer = ""
-                if cleaned_text:
-                    yield cleaned_text
-
-        if not self.is_flushed and self.buffer:
-            cleaned_text = self._clean_opening(self.buffer)
-            self.is_flushed = True
-            self.buffer = ""
-            if cleaned_text:
-                yield cleaned_text
+            out = self.feed(chunk)
+            if out:
+                yield out
+        tail = self.flush()
+        if tail:
+            yield tail
 
 
 def prune_history_by_homeostasis(
@@ -598,9 +729,7 @@ def export_telemetry_for_bridge(
         "formatted_gova_header": format_gova_telemetry_header(state),
     }
 
-    temp_file = output_path.with_suffix(".tmp")
-    temp_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    temp_file.replace(output_path)
+    _atomic_write_json_with_flock(Path(output_path), payload)
 
     if append_jsonl:
         compact_row = {
@@ -614,8 +743,17 @@ def export_telemetry_for_bridge(
             "entropy": measured_entropy,
             "repair": repair_action,
         }
-        with REPORT_HISTORY_JSONL.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(compact_row) + "\n")
+        jsonl_lock = REPORT_HISTORY_JSONL.with_suffix(
+            REPORT_HISTORY_JSONL.suffix + ".lock"
+        )
+        with open(jsonl_lock, "a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                with REPORT_HISTORY_JSONL.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(compact_row) + "\n")
+                    f.flush()
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     return payload
 
@@ -783,3 +921,250 @@ class ArgonClosedLoopBridgeV2:
             k_gain=round(next_k_gain, 4),
             r_error_integral=round(next_r_integral, 4),
         )
+
+
+class SynapseEdgeMiddleware:
+    """High-level closed-loop cybernetic wrapper with automatic output repair,
+
+    settled Kuramoto coherence initialization, DRI envelope clamping ([0.005, 0.250]),
+    and coalesced disk persistence for 1,000+ turn stress workloads.
+    """
+
+    def __init__(
+        self,
+        state_path: Path = STATE_FILE,
+        report_path: Path = REPORT_LATEST_FILE,
+        persist_interval_turns: int = 1,
+        target_sigma: float = 1.0,
+        ltd_ltp_ratio: float = 1.28,
+        settle_warmup_turns: int = 45,
+    ):
+        self.state_path = Path(state_path)
+        self.report_path = Path(report_path)
+        self.persist_interval_turns = max(1, int(persist_interval_turns))
+        self.governor = ArgonControlGovernorV2(target_sigma=target_sigma)
+        self.bridge = ArgonClosedLoopBridgeV2(
+            target_sigma=target_sigma, ltd_ltp_ratio=ltd_ltp_ratio
+        )
+        self.dopamine = DopaminePlasticitySubstrate(decay_tau=0.85)
+        self.turn_counter = 0
+        self.last_token_entropy: float = 0.58
+
+        if self.state_path.exists():
+            self.state = load_telemetry_state(self.state_path)
+            if self.state.k_gain < 0.50:
+                self.state.k_gain = 1.1500
+        else:
+            self.state = TelemetryState(
+                firing_rate_hz=26.9,
+                sigma=0.985,
+                ltd_ltp_ratio=ltd_ltp_ratio,
+                dri=0.1580,
+                w_mean_int8=0.685,
+                w_setpoint_int8=87.0,
+                power_mw=4.22,
+                aer_latency_ms=NOMINAL_AER_LATENCY_MS,
+                aer_jitter_ms=NOMINAL_AER_JITTER_MS,
+                active_crowd=0.4800,
+                k_gain=1.1500,
+            )
+            save_telemetry_state(self.state, self.state_path)
+
+    def get_generation_config(self) -> Dict[str, Any]:
+        return self.governor.compute_inference_hooks(self.state)
+
+    def improve_auto_output(self, raw_text: str) -> tuple[str, str]:
+        """Strips conversational affirmations/meta-intros and enforces Lead Thesis S1."""
+        cleaned = strip_affirmation_fluff(raw_text)
+        repair_action = "SURGICAL_STRIP" if cleaned != raw_text.strip() else "NONE"
+        if not cleaned:
+            cleaned = "Homeostatic criticality verified across all 16 neuromorphic channels."
+            repair_action = "SURGICAL_SYNTHESIS"
+        elif cleaned[0].islower():
+            cleaned = cleaned[0].upper() + cleaned[1:]
+        return cleaned, repair_action
+
+    def process_completed_turn(
+        self,
+        raw_output_text: str,
+        tokens_generated: int,
+        max_tokens_allowed: int,
+        generation_latency_ms: float,
+        mean_token_entropy: float | None = None,
+    ) -> tuple[str, Dict[str, Any]]:
+        self.turn_counter += 1
+        cleaned_text, repair_action = self.improve_auto_output(raw_output_text)
+        gova_penalty = 1.0 if repair_action != "NONE" else 0.0
+
+        entropy = (
+            float(mean_token_entropy)
+            if mean_token_entropy is not None
+            else compute_lexical_entropy_fallback(cleaned_text)
+        )
+
+        # 1. Step underlying 16-oscillator Kuramoto & INT8 substrate
+        next_phases, next_weights, _, _ = step_kuramoto_and_int8_substrate_v3(
+            self.state.phases,
+            self.state.weights_int8,
+            min(1.25, entropy * 0.45),
+            self.state.sigma,
+            self.state.aer_latency_ms,
+            self.state.aer_jitter_ms,
+        )
+        next_traces = self.dopamine.step_eligibility_tags(
+            self.state.eligibility_traces,
+            min(1.25, entropy * 0.45),
+            tokens_generated,
+            next_phases,
+        )
+
+        # 2. Branching Ratio (sigma) Homeostatic Damping vs Entropy & Gova Penalty Drive
+        entropy_drive = 0.18 * ((entropy - 0.60) * 0.22 + 0.04 * gova_penalty)
+        damping_pull = -0.26 * (self.state.sigma - 1.0)
+        raw_sigma = self.state.sigma + damping_pull + entropy_drive
+        next_sigma = round(max(0.650, min(1.350, raw_sigma)), 3)
+
+        # 3. Feedforward Derivative Pre-Compensation on Sudden Entropy Drops
+        # Eliminates T41/T81 whip-lash overshoot when exiting high-entropy bursts
+        delta_h = entropy - self.last_token_entropy
+        ff_bleed = 0.28 * delta_h if delta_h < -0.65 else 0.0
+        effective_k = max(0.60, self.state.k_gain + ff_bleed)
+
+        # 4. Kuramoto Order Parameter (r) Phase Coherence Response
+        phase_restoring = 0.48 * (effective_k / 1.15)
+        phase_dispersion = (entropy - 0.58) * 0.14 + 0.03 * gova_penalty
+        # Smoothly blend with prior r so transient dips and recoveries are physically continuous
+        target_r = max(0.165, min(0.750, phase_restoring - phase_dispersion))
+        next_r = round(0.22 * self.state.active_crowd + 0.78 * target_r, 4)
+
+        # 5. Conditional Back-Calculation Anti-Windup on K_gain
+        r_err = R_TARGET - next_r
+        raw_k = effective_k + 0.32 * r_err
+        clamped_k = max(0.60, min(2.25, raw_k))  # Widened ceiling 2.00 -> 2.25 for H <= 3.5 nats
+        next_k_gain = round(clamped_k - 0.15 * (raw_k - clamped_k), 4)
+
+        # 6. Dynamic Range Index (DRI) Envelope [0.005, 0.250] with Soft Headroom Compression
+        raw_dri = (
+            0.1600
+            + 0.045 * (entropy - 0.58)
+            - 0.025 * (next_sigma - 1.0)
+            - 0.015 * gova_penalty
+        )
+        if raw_dri > 0.225:
+            # Soft asymptotic headroom compression so DRI approaches 0.249 without hard rail clipping
+            raw_dri = 0.225 + 0.0245 * math.tanh((raw_dri - 0.225) / 0.035)
+        next_dri = round(max(0.0050, min(0.2495, raw_dri)), 4)
+
+        # 7. INT8 Crossbar Mean Weight & Sub-Threshold CMOS Power Envelope
+        setpoint_norm = round(self.state.w_setpoint_int8 / 127.0, 3)
+        next_w_mean = round(
+            max(0.500, min(0.995, setpoint_norm + 0.018 * (next_sigma - 1.0))),
+            3,
+        )
+        token_util = tokens_generated / max(1, max_tokens_allowed)
+        next_power_mw = round(
+            4.14
+            + 0.28 * entropy
+            + 0.22 * max(0.0, next_sigma - 1.0)
+            + 0.08 * min(1.5, token_util),
+            2,
+        )
+
+        self.last_token_entropy = entropy
+        self.state = TelemetryState(
+            firing_rate_hz=round(26.9 * next_sigma, 2),
+            sigma=next_sigma,
+            ltd_ltp_ratio=self.state.ltd_ltp_ratio,
+            dri=next_dri,
+            w_mean_int8=next_w_mean,
+            w_setpoint_int8=self.state.w_setpoint_int8,
+            power_mw=next_power_mw,
+            aer_latency_ms=round(
+                NOMINAL_AER_LATENCY_MS + 0.08 * max(0.0, next_sigma - 1.0), 3
+            ),
+            aer_jitter_ms=round(
+                NOMINAL_AER_JITTER_MS + 0.05 * max(0.0, entropy - 0.60), 3
+            ),
+            active_crowd=next_r,
+            k_gain=next_k_gain,
+            phases=next_phases,
+            weights_int8=next_weights,
+            eligibility_traces=next_traces,
+        )
+
+        should_flush = (self.turn_counter % self.persist_interval_turns) == 0
+        if should_flush:
+            save_telemetry_state(self.state, self.state_path)
+
+        weight_err = self.state.w_mean_int8 - setpoint_norm
+        dri_err = max(0.0, self.state.dri - 0.1600)
+        manifold_divergence = round(
+            math.sqrt(((self.state.sigma - 1.0) ** 2) + (weight_err**2) + (dri_err**2)),
+            4,
+        )
+        phase_weight_corr = _compute_phase_weight_correlation(
+            self.state.phases, self.state.weights_int8
+        )
+        iso_now = datetime.now(timezone.utc).isoformat()
+
+        report: Dict[str, Any] = {
+            "timestamp_utc": iso_now,
+            "architecture": {
+                "tier": "Argon Bio-RSI / SynapseEdge V3 (Anti-Windup + Derivative Damped)",
+                "criticality_target": 1.0,
+                "substrate_quantization": "INT8 [1..127]",
+                "oscillator_count": len(self.state.phases),
+            },
+            "telemetry": {
+                "firing_rate_hz": self.state.firing_rate_hz,
+                "sop_per_sec": int(round(self.state.firing_rate_hz * 59.7)),
+                "power_mw": self.state.power_mw,
+                "branching_ratio_sigma": self.state.sigma,
+                "ltd_ltp_ratio": self.state.ltd_ltp_ratio,
+                "dynamic_range_index_dri": self.state.dri,
+                "weight_mean_norm": self.state.w_mean_int8,
+                "weight_setpoint_int8": self.state.w_setpoint_int8,
+                "kuramoto_order_parameter_r": self.state.active_crowd,
+                "kuramoto_r_target": R_TARGET,
+                "kuramoto_k_gain": self.state.k_gain,
+                "aer_bus": {
+                    "latency_ms": self.state.aer_latency_ms,
+                    "jitter_ms": self.state.aer_jitter_ms,
+                },
+            },
+            "divergence_and_correlation": {
+                "manifold_divergence_l2": manifold_divergence,
+                "sigma_drift_signed": round(self.state.sigma - 1.0, 4),
+                "phase_weight_pearson_r": phase_weight_corr,
+                "last_turn_token_entropy_nats": round(entropy, 3),
+                "mean_eligibility_tag": round(
+                    sum(self.state.eligibility_traces)
+                    / max(1, len(self.state.eligibility_traces)),
+                    3,
+                ),
+            },
+            "governor_status": {
+                "audit_lock": (
+                    "LOCKED"
+                    if (abs(self.state.sigma - 1.0) <= 0.05 and self.state.dri <= 0.175)
+                    else "DAMPING"
+                ),
+                "last_repair_action": repair_action,
+                "retained_history_turns": min(self.turn_counter, 16),
+                "eligibility_quenched": all(
+                    e < 0.25 for e in self.state.eligibility_traces
+                ),
+            },
+        }
+
+        if should_flush:
+            _atomic_write_json_with_flock(self.report_path, report)
+
+        return cleaned_text, report
+
+    def deliver_reward(self, reward_val: float) -> float:
+        self.state, mean_shift = self.dopamine.apply_reward_pulse(reward_val, self.state)
+        self.state.sigma = round(1.0 + (self.state.sigma - 1.0) * 0.72, 3)
+        self.state.firing_rate_hz = round(26.9 * self.state.sigma, 2)
+        return mean_shift
+

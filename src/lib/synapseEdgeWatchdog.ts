@@ -1677,6 +1677,19 @@ export class SynapseEdgeWatchdogEngine {
       'bcm sliding threshold theta_m dampening multiplier',
     ];
 
+    // Substring Backdoor Guard: If the text contains a multi-line diff (`\n+` or `\n-`) that mutates
+    // executable code or control parameters while only matching a documentation/typo keyword ('typo',
+    // 'readme', '.md', 'docstring'), reject the allowlist match so executable diffs cannot piggyback
+    // on a harmless-looking title.
+    const hasDiffHunk = /\n\s*[+-]\s*[^/\s#*-]/.test(lower);
+    if (hasDiffHunk) {
+      const nonDocPatterns = safePatterns.slice(8); // patterns after doc/typo group
+      const matchesNonDocSafePattern = nonDocPatterns.some((p) => lower.includes(p));
+      if (!matchesNonDocSafePattern) {
+        return false;
+      }
+    }
+
     return safePatterns.some((p) => lower.includes(p));
   }
 

@@ -1,0 +1,65 @@
+{
+  "total_turns": 1000,
+  "invariants": {
+    "kuramoto_tracking_pass": true,
+    "dri_boundedness_pass": true,
+    "lyapunov_dissipative_pass": true
+  },
+  "global_envelopes": {
+    "mean_r": 0.4793,
+    "min_r": 0.3174,
+    "max_r": 0.5481,
+    "mean_r_error": 0.011,
+    "mean_dri": 0.1625,
+    "min_dri": 0.1435,
+    "max_dri": 0.1978,
+    "mean_ftle": -0.0019,
+    "sigma_range": [
+      0.942,
+      1.194
+    ],
+    "power_mw_range": [
+      4.19,
+      4.73
+    ],
+    "weight_norm_range": [
+      0.684,
+      0.702
+    ],
+    "mean_l2_divergence": 0.0575
+  },
+  "regime_breakdown": {
+    "A_LOW_ENTROPY": {
+      "turns": 250,
+      "mean_sigma": 0.949,
+      "mean_r": 0.4814,
+      "mean_dri": 0.147,
+      "mean_power_mw": 4.22,
+      "mean_ftle": 0.0008
+    },
+    "B_NOMINAL_CRITICAL": {
+      "turns": 250,
+      "mean_sigma": 1.0004,
+      "mean_r": 0.4786,
+      "mean_dri": 0.1612,
+      "mean_power_mw": 4.32,
+      "mean_ftle": -0.0119
+    },
+    "C_HIGH_ENTROPY_BURST": {
+      "turns": 250,
+      "mean_sigma": 1.1643,
+      "mean_r": 0.475,
+      "mean_dri": 0.1827,
+      "mean_power_mw": 4.63,
+      "mean_ftle": 0.0167
+    },
+    "D_RECOVERY_REWARDS": {
+      "turns": 250,
+      "mean_sigma": 0.996,
+      "mean_r": 0.4822,
+      "mean_dri": 0.159,
+      "mean_power_mw": 4.3,
+      "mean_ftle": -0.0127
+    }
+  }
+}

@@ -856,6 +856,30 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
     };
     decision: WatchdogProposalDecision;
     preUpdateSnapshotHash: string;
+    expectedPreHash?: string;
+    fullFileContentSha256?: string;
+    authorityPath?: 'AUTOMATED_BOUNDED_SANDBOX' | 'HUMAN_IN_THE_LOOP_SIGNOFF' | 'REJECTED_BY_WATCHDOG';
+    requiresHumanSignoff?: boolean;
+    substringBackdoorAudit?: {
+      backdoorDetected: boolean;
+      claimsDocOrTypoOnly: boolean;
+      targetsExecutableFile: boolean;
+      touchesExecutableOrControlCode: boolean;
+      executableLinesTouched: string[];
+      reason: string;
+    };
+    receipt?: {
+      receiptId: string;
+      timestamp: number;
+      expectedPreHash: string;
+      verifiedPreHash: string;
+      preHashMatched: boolean;
+      diffSha256: string;
+      merkleLeafHash: string;
+      merkleRootAfterCommit: string;
+      authorityPath: string;
+      hmacSignature: string;
+    };
     canWriteToCodebase: boolean;
     modelUsed?: string;
   } | null>(null);
@@ -866,8 +890,34 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
     appliedAt?: number;
     rollbackSnapshotHash?: string;
     commitId?: string;
+    authorityPath?: string;
+    failureModePrevented?: string;
+    receipt?: {
+      receiptId: string;
+      merkleLeafHash: string;
+      merkleRootAfterCommit: string;
+      hmacSignature: string;
+    };
   } | null>(null);
   const [bridgeError, setBridgeError] = useState<string | null>(null);
+  const [operatorSignoffName, setOperatorSignoffName] = useState<string>('Lead Neuromorphic Reviewer');
+  const [isRunningSeparationAudit, setIsRunningSeparationAudit] = useState<boolean>(false);
+  const [separationAuditReport, setSeparationAuditReport] = useState<{
+    allPassed: boolean;
+    verifiedAt: number;
+    merkleRootHash: string;
+    checks: Array<{
+      id: string;
+      pillar: string;
+      scenario: string;
+      passed: boolean;
+      statusCode: number;
+      failureModePrevented?: string;
+      detail: string;
+      receiptId: string;
+      merkleLeafHash: string;
+    }>;
+  } | null>(null);
 
   // Generator state
   const [isGeneratingNovelCases, setIsGeneratingNovelCases] = useState<boolean>(false);
@@ -1126,9 +1176,12 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
     }
   };
 
-  // Model Builder Bridge: commit verified approved refactoring to codebase
-  const handleApplyCodebaseRefactoring = async () => {
-    if (!modelProposalResult || !modelProposalResult.canWriteToCodebase) {
+  // Model Builder Bridge: commit verified approved refactoring (or Human-in-the-Loop signed-off escalation) to codebase
+  const handleApplyCodebaseRefactoring = async (withHumanSignoff: boolean = false) => {
+    if (!modelProposalResult) {
+      return;
+    }
+    if (!modelProposalResult.canWriteToCodebase && !withHumanSignoff) {
       return;
     }
 
@@ -1147,17 +1200,37 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
         body: JSON.stringify({
           targetFile: modelProposalResult.proposal.targetFile,
           decision: modelProposalResult.decision,
+          expectedPreHash:
+            modelProposalResult.expectedPreHash ||
+            modelProposalResult.fullFileContentSha256 ||
+            modelProposalResult.preUpdateSnapshotHash,
           snapshotHash: modelProposalResult.preUpdateSnapshotHash,
           proposalTitle: modelProposalResult.proposal.title,
+          diff: modelProposalResult.proposal.diff,
+          rationale: modelProposalResult.proposal.rationale,
+          ...(withHumanSignoff
+            ? {
+                operatorSignoff: {
+                  approvedBy: operatorSignoffName || 'Human Operator',
+                  rationale: `Human-in-the-loop signoff after verifying diff hunks and expectedPreHash (${modelProposalResult.preUpdateSnapshotHash}).`,
+                },
+              }
+            : {}),
         }),
       });
 
+      const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        const errData = await resp.json().catch(() => ({}));
-        throw new Error(errData.error || `Commit failed with status ${resp.status}`);
+        setCodebaseCommitStatus({
+          success: false,
+          message: data.error || `Commit failed with status ${resp.status}`,
+          failureModePrevented: data.failureModePrevented,
+          authorityPath: data.authorityPath,
+          receipt: data.receipt,
+        });
+        return;
       }
 
-      const data = await resp.json();
       if (engine) {
         engine.applyModelAdjustments({
           aPlus: 0.032,
@@ -1181,10 +1254,14 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
       }
       setCodebaseCommitStatus({
         success: true,
-        message: data.message || 'Codebase self-refactoring verified, compiled by Builder, and applied to live SNN model.',
+        message:
+          data.message ||
+          'Codebase self-refactoring verified, compiled by Builder, and applied to live SNN model.',
         appliedAt: data.appliedAt,
         rollbackSnapshotHash: data.rollbackSnapshotHash,
-        commitId: data.commitId || data.ledgerRecord?.id,
+        commitId: data.commitId || data.commitRecord?.id,
+        authorityPath: data.authorityPath,
+        receipt: data.receipt,
       });
 
       const commitEntry = SynapseEdgeWatchdogEngine.createLogicFlowEntry(
@@ -1201,6 +1278,27 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
       });
     } finally {
       setIsCommittingCodebase(false);
+    }
+  };
+
+  // Run 4-Pillar Separation of Authority Self-Test (`src/server/shadowRefactoring.ts`)
+  const handleRunSeparationOfAuthorityAudit = async () => {
+    setIsRunningSeparationAudit(true);
+    try {
+      const resp = await fetch('/api/watchdog/separation-of-authority-audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.report) {
+          setSeparationAuditReport(data.report);
+        }
+      }
+    } catch {
+      // Ignore transient network errors
+    } finally {
+      setIsRunningSeparationAudit(false);
     }
   };
 
@@ -2571,44 +2669,105 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                       : 'Action Boundary Enforcement: The Watchdog blocked this change from being committed to the codebase because it violated safety invariants.'}
                   </p>
 
+                  {/* Pre-Hash & Substring Backdoor Security Matrix */}
+                  <div className="bg-slate-950/90 border border-slate-800 rounded-lg p-3 flex flex-col gap-1.5 text-[10px] font-mono">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">expectedPreHash (SHA-256):</span>
+                      <span className="text-emerald-300 font-bold">
+                        {(modelProposalResult.expectedPreHash || modelProposalResult.preUpdateSnapshotHash || '').slice(0, 16)}…
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Substring Backdoor Check:</span>
+                      <span
+                        className={`font-bold ${
+                          modelProposalResult.substringBackdoorAudit?.backdoorDetected
+                            ? 'text-rose-400'
+                            : 'text-emerald-400'
+                        }`}
+                      >
+                        {modelProposalResult.substringBackdoorAudit?.backdoorDetected
+                          ? 'BACKDOOR INTERCEPTED (BLOCK)'
+                          : 'CLEAN (Diff Matches Scope)'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Authority Routing Path:</span>
+                      <span className="text-indigo-300 font-bold">
+                        {modelProposalResult.authorityPath ||
+                          (modelProposalResult.canWriteToCodebase
+                            ? 'AUTOMATED_BOUNDED_SANDBOX'
+                            : modelProposalResult.decision.decision === 'ESCALATE'
+                            ? 'HUMAN_IN_THE_LOOP_SIGNOFF'
+                            : 'REJECTED_BY_WATCHDOG')}
+                      </span>
+                    </div>
+                    {modelProposalResult.receipt && (
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+                        <span className="text-slate-400">Merkle Receipt Leaf:</span>
+                        <span className="text-cyan-300">
+                          {modelProposalResult.receipt.receiptId} ({modelProposalResult.receipt.merkleLeafHash.slice(0, 12)}…)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
                   {modelProposalResult.canWriteToCodebase ? (
                     <button
                       disabled={isCommittingCodebase || codebaseCommitStatus?.success}
-                      onClick={handleApplyCodebaseRefactoring}
+                      onClick={() => handleApplyCodebaseRefactoring(false)}
                       className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-700/30 transition-all cursor-pointer"
                     >
                       {isCommittingCodebase ? (
                         <>
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>Writing & Committing Refactoring...</span>
+                          <span>Verifying expectedPreHash & Applying...</span>
                         </>
                       ) : codebaseCommitStatus?.success ? (
                         <>
                           <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Codebase Successfully Updated</span>
+                          <span>Codebase Updated with Merkle Receipt</span>
                         </>
                       ) : (
                         <>
                           <GitCommit className="w-3.5 h-3.5" />
-                          <span>Commit & Apply Refactoring to Codebase</span>
+                          <span>Atomic Disk Apply (Bounded Sandbox Verified)</span>
                         </>
                       )}
                     </button>
                   ) : modelProposalResult.decision.decision === 'ESCALATE' ? (
-                    <div className="p-3 bg-amber-950/30 rounded-lg border border-amber-700/50 text-[11px] text-amber-200 flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                      <span>
-                        Escalated to Operator under Fail-Closed Policy. Unrecognized refactoring proposals cannot be auto-approved.
-                      </span>
+                    <div className="p-3 bg-amber-950/30 rounded-lg border border-amber-700/50 text-[11px] text-amber-200 flex flex-col gap-2.5">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>
+                          <strong>Human-in-the-Loop Consequential Scope:</strong> Automatic approval is denied. An operator must review the diff and sign off to authorize atomic disk apply.
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={operatorSignoffName}
+                          onChange={(e) => setOperatorSignoffName(e.target.value)}
+                          placeholder="Reviewer Signoff Identity"
+                          className="flex-1 bg-slate-950 border border-amber-700/50 rounded px-2.5 py-1.5 text-[11px] text-white font-mono"
+                        />
+                        <button
+                          disabled={isCommittingCodebase || codebaseCommitStatus?.success || !operatorSignoffName.trim()}
+                          onClick={() => handleApplyCodebaseRefactoring(true)}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-slate-950 font-bold rounded text-[11px] cursor-pointer shrink-0"
+                        >
+                          {isCommittingCodebase ? 'Signing...' : 'Sign Off & Apply'}
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div className="p-3 bg-slate-950 rounded-lg border border-rose-900/50 text-[11px] text-rose-300 flex items-center gap-2">
                       <Lock className="w-4 h-4 text-rose-400 shrink-0" />
-                      <span>Action boundary locked. No file writes permitted without Watchdog APPROVE.</span>
+                      <span>Immutable Watchdog Gate locked. BLOCK verdicts cannot be overridden or self-authorized.</span>
                     </div>
                   )}
 
-                  {/* Commit Result Banner */}
+                  {/* Commit Result & Cryptographic Receipt Banner */}
                   {codebaseCommitStatus && (
                     <div
                       className={`p-3 rounded-lg border text-xs flex flex-col gap-1.5 ${
@@ -2625,12 +2784,24 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                         )}
                         <span>{codebaseCommitStatus.message}</span>
                       </div>
-                      {codebaseCommitStatus.rollbackSnapshotHash && (
-                        <div className="text-[10px] text-slate-300 font-mono flex items-center justify-between pt-1 border-t border-emerald-900/40">
-                          <span>Rollback Snapshot Hash:</span>
-                          <span className="font-bold text-emerald-300">
-                            {codebaseCommitStatus.rollbackSnapshotHash.slice(0, 16)}...
-                          </span>
+                      {codebaseCommitStatus.receipt && (
+                        <div className="text-[10px] text-slate-300 font-mono flex flex-col gap-0.5 pt-1 border-t border-slate-800/80">
+                          <div className="flex justify-between">
+                            <span>Receipt ID:</span>
+                            <span className="text-cyan-300 font-bold">{codebaseCommitStatus.receipt.receiptId}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Merkle Root:</span>
+                            <span className="text-emerald-300">
+                              {codebaseCommitStatus.receipt.merkleRootAfterCommit.slice(0, 20)}…
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>HMAC-SHA256:</span>
+                            <span className="text-indigo-300">
+                              {codebaseCommitStatus.receipt.hmacSignature.slice(0, 20)}…
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -2639,6 +2810,125 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
               </div>
             </div>
           )}
+
+          {/* Separation of Authority & Cryptographic Pre-Hash Verification Suite Card */}
+          <div className="bg-slate-900 border border-indigo-500/30 rounded-xl p-5 shadow-xl flex flex-col gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span className="text-sm font-bold text-white uppercase tracking-wider">
+                    Separation of Authority & Cryptographic Pre-Hash Gate (`shadowRefactoring.ts` / `security.ts`)
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Enforces Immutable Watchdog Boundary, exact <code className="text-emerald-300">expectedPreHash</code> verification, zero substring backdoors, and Merkle-linked audit receipts.
+                </p>
+              </div>
+              <button
+                disabled={isRunningSeparationAudit}
+                onClick={handleRunSeparationOfAuthorityAudit}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/20 cursor-pointer"
+              >
+                {isRunningSeparationAudit ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Verifying 4 Security Pillars...</span>
+                  </>
+                ) : (
+                  <>
+                    <Fingerprint className="w-3.5 h-3.5" />
+                    <span>Run 4-Pillar Separation-of-Authority Audit</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
+              <div className="lg:col-span-5 bg-slate-950 border border-slate-800 rounded-lg p-3 font-mono text-[10px] text-slate-300 leading-relaxed whitespace-pre overflow-x-auto">
+{`[ Proposing Agent / Model ]
+           │ (Proposal + Diff + expectedPreHash)
+           ▼
+[ Hardened Watchdog Boundary ] ──(Fail-Closed / AST / Hash)
+           │
+     ┌─────┴────────────────────────┐
+     ▼                              ▼
+[ Bounded / Verified Safe ]    [ Consequential / Unverified ]
+(Strict Sandbox / Auto CI)     (Human-in-the-Loop Signoff)
+     └──────────────┬───────────────┘
+                    ▼
+     [ Atomic Disk Apply + Merkle Receipt ]`}
+              </div>
+
+              <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
+                <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg">
+                  <div className="font-bold text-emerald-300 mb-1">1. Immutable Watchdog Gate</div>
+                  <p className="text-slate-400 text-[10px]">
+                    Model has zero direct filesystem write access. Protected files (<code className="text-slate-300">synapseEdgeWatchdog.ts</code>, <code className="text-slate-300">security.ts</code>, <code className="text-slate-300">server.ts</code>) can never be altered.
+                  </p>
+                </div>
+                <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg">
+                  <div className="font-bold text-cyan-300 mb-1">2. Pre-Hash Verification (`expectedPreHash`)</div>
+                  <p className="text-slate-400 text-[10px]">
+                    Every proposal binds to the exact SHA-256 of the target file on disk. Any out-of-band modification fails immediately with <code className="text-rose-300">409 Conflict</code>.
+                  </p>
+                </div>
+                <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg">
+                  <div className="font-bold text-amber-300 mb-1">3. No Substring Backdoors</div>
+                  <p className="text-slate-400 text-[10px]">
+                    Claiming <code className="text-amber-200">"Minor typo fix in README"</code> while touching executable code or SNN parameters in the diff hunk is intercepted and blocked.
+                  </p>
+                </div>
+                <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg">
+                  <div className="font-bold text-purple-300 mb-1">4. Human-in-the-Loop & Merkle Receipts</div>
+                  <p className="text-slate-400 text-[10px]">
+                    Unverified or architectural scope routes to operator signoff, and every evaluation produces a signed Merkle-tree receipt.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {separationAuditReport && (
+              <div className="bg-slate-950 border border-emerald-500/30 rounded-lg p-3.5 flex flex-col gap-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2 text-xs">
+                  <span className="font-bold text-emerald-300 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>
+                      4-Pillar Adversarial Verification Passed ({separationAuditReport.checks.filter((c) => c.passed).length}/
+                      {separationAuditReport.checks.length} Enforced)
+                    </span>
+                  </span>
+                  <span className="font-mono text-[10px] text-slate-400">
+                    Receipt Ledger Merkle Root:{' '}
+                    <strong className="text-cyan-300">{separationAuditReport.merkleRootHash.slice(0, 20)}…</strong>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {separationAuditReport.checks.map((chk) => (
+                    <div
+                      key={chk.id}
+                      className="p-2.5 rounded bg-slate-900/90 border border-slate-800 flex flex-col gap-1 text-[10px]"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-white">{chk.pillar}</span>
+                        <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
+                          HTTP {chk.statusCode} &bull; {chk.failureModePrevented}
+                        </span>
+                      </div>
+                      <div className="text-slate-400">{chk.scenario}</div>
+                      <div className="text-rose-300/90 font-mono truncate" title={chk.detail}>
+                        {chk.detail}
+                      </div>
+                      <div className="flex items-center justify-between text-slate-500 font-mono pt-1 border-t border-slate-800/70">
+                        <span>Receipt: {chk.receiptId}</span>
+                        <span>Leaf: {chk.merkleLeafHash.slice(0, 12)}…</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <>
