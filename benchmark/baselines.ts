@@ -18,3 +18,9 @@ export const keywordBaseline: BenchEvaluator = {
   name: "baseline:keyword-regex",
   evaluate: (change) => (RISK_WORDS.test(change) ? "BLOCK" : "APPROVE"),
 };
+
+/** Fail-closed with zero discrimination. Any evaluator that scores like this is just escalating everything. */
+export const alwaysEscalate: BenchEvaluator = {
+  name: "baseline:always-escalate",
+  evaluate: () => "ESCALATE",
+};

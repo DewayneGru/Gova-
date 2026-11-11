@@ -70,6 +70,11 @@ import {
   POISONED_INTEGRITY_TEST_VECTORS,
   INITIAL_LOGIC_FLOW_AUDIT_LOG,
 } from '../lib/synapseEdgeWatchdog';
+import {
+  COMMUNITY_SEED_V1_MANIFEST,
+  COMMUNITY_SEED_V2_MANIFEST,
+  COMMUNITY_SEED_V2_MERKLE_ROOT,
+} from '../lib/community_seed_v1';
 import { SNNEngine } from '../lib/snnEngine';
 import { AntiDivergenceEngine, registerEvaluationHook } from '../lib/selfImprovement';
 import {
@@ -89,7 +94,7 @@ import { useAuth } from '../context/AuthContext';
 /**
  * UNIFIED SPARK EVALUATION HOOK (`useUnifiedSparkEvaluationHook`)
  *
- * Standardizes how Spark Agents (`gemini-3.1-pro-preview` Evaluator + `gemini-3.8-flash` Reviewer)
+ * Standardizes how Spark Agents (`gemini-4-argon` / Argon Volece Evaluator + `gemini-3.8-flash` Reviewer)
  * evaluate recursive benchmark suites & biophysical stability invariants, trigger Watchdog
  * Auto-Remodeling Suggestions on any failure, and report standardized data-driven telemetry
  * payloads (`StandardizedSparkBenchmarkReportPayload`) back to the Self-Improvement Engine
@@ -451,7 +456,7 @@ export function useUnifiedSparkEvaluationHook(params: {
       epochNumber: hookEpochSequence,
       suiteType: benchmarkResult.suiteType,
       ruleVersion,
-      evaluatorModel: 'gemini-3.1-pro-preview',
+      evaluatorModel: 'gemini-4-argon',
       reviewerModel: 'gemini-3.8-flash',
       benchmarkMetrics: {
         totalCases: benchmarkResult.totalCases,
@@ -513,7 +518,7 @@ export function useUnifiedSparkEvaluationHook(params: {
           epochNumber: nextEpoch,
           suiteType: benchmarkResult.suiteType,
           ruleVersion: applyAutoRemodeling ? 'v3_spark_rsi' : ruleVersion,
-          evaluatorModel: 'gemini-3.1-pro-preview',
+          evaluatorModel: 'gemini-4-argon',
           reviewerModel: 'gemini-3.8-flash',
           benchmarkMetrics: {
             totalCases: benchmarkResult.totalCases,
@@ -822,6 +827,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
   // Benchmark state
   const [suiteType, setSuiteType] = useState<'prototype_42' | 'sealed_147' | 'rsi_remodeling_36' | 'community_seed_25' | 'fresh_probe_16'>('fresh_probe_16');
   const [showSealedV1Commitments, setShowSealedV1Commitments] = useState<boolean>(false);
+  const [selectedSealedVersion, setSelectedSealedVersion] = useState<'v1' | 'v2'>('v2');
   const [ruleVersion, setRuleVersion] = useState<'first_version' | 'improved_rules' | 'v3_spark_rsi'>('v3_spark_rsi');
   const [activeFilterCategory, setActiveFilterCategory] = useState<string>('all');
   const [activeFilterStatus, setActiveFilterStatus] = useState<'all' | 'caught' | 'false_alarm' | 'missed' | 'escalated' | 'approved'>('all');
@@ -2070,9 +2076,8 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                   onChange={(e) => setBuilderModel(e.target.value)}
                   className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs focus:outline-none focus:border-indigo-500"
                 >
-                  <option value="gemini-4-argon">Gemini 4 Argon (Final Set Builder & RSI Self-Improvement Engine)</option>
-                  <option value="gemini-3.8-flash">Gemini 3.8 Flash + 3.1 Pro + Gemini Spark Wrapper</option>
-                  <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro + Spark (Deep Invariant & Code Synthesis)</option>
+                  <option value="gemini-4-argon">Gemini 4 Argon (Argon Volece Bio-SNN Master & RSI Engine)</option>
+                  <option value="gemini-3.8-flash">Gemini 3.8 Flash + Spark Reviewer</option>
                   <option value="algorithmic-snn-builder">Algorithmic Biological Builder</option>
                 </select>
               </div>
@@ -2887,7 +2892,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-slate-400">
-                    <span>Evaluator: <strong className="text-cyan-300">Spark (3.1-Pro)</strong></span>
+                    <span>Evaluator: <strong className="text-cyan-300">Argon Volece (gemini-4-argon)</strong></span>
                     <span>&bull;</span>
                     <span>Reviewer: <strong className="text-sky-300">3.8-Flash</strong></span>
                     <span>&bull;</span>
@@ -2948,24 +2953,39 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
         </div>
 
         {/* KPI 2: Escalation Rate on Safe Changes (Headline Fail-Closed Cost Metric) */}
-        <div className="bg-slate-900 border border-purple-500/40 rounded-xl p-4 shadow-lg flex flex-col justify-between">
+        <div className="bg-slate-900 border border-purple-500/50 rounded-xl p-4 shadow-lg flex flex-col justify-between relative overflow-hidden">
           <div className="flex items-center justify-between text-purple-300 mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Safe Escalation Rate</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5">
+              <span>Safe Escalation Rate</span>
+              <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-purple-500/20 text-purple-200 border border-purple-500/30">
+                Fail-Closed
+              </span>
+            </span>
             <ExternalLink className="w-4 h-4 text-purple-400" />
           </div>
-          <div
-            className={`text-2xl sm:text-3xl font-black tracking-tight ${
-              benchmarkResult.safeEscalationRatePct === 0 ? 'text-emerald-400' : 'text-amber-300'
-            }`}
-          >
-            {benchmarkResult.safeEscalationRatePct}%
+          <div className="flex items-baseline justify-between mt-0.5">
+            <div
+              className={`text-2xl sm:text-3xl font-black tracking-tight ${
+                benchmarkResult.safeEscalationRatePct === 0 ? 'text-emerald-400' : 'text-amber-300'
+              }`}
+            >
+              {benchmarkResult.safeEscalationRatePct}%
+            </div>
+            <div className="text-[10px] text-slate-400 text-right">
+              <span className="text-slate-500 line-through">100% baseline</span>
+              <div className="text-emerald-400 font-bold">
+                {benchmarkResult.safeCount > 0
+                  ? `+${Math.round((benchmarkResult.approvedSafeCount / benchmarkResult.safeCount) * 100)}% auto-pass`
+                  : 'N/A'}
+              </div>
+            </div>
           </div>
-          <div className="text-[10px] text-slate-300 mt-1 flex items-center justify-between">
+          <div className="text-[10px] text-slate-300 mt-1 flex items-center justify-between border-t border-slate-800/80 pt-1">
             <span className="text-purple-300 font-semibold">
               {benchmarkResult.escalatedSafeCount} / {benchmarkResult.safeCount} safe escalated
             </span>
             <span className="text-emerald-400">
-              {benchmarkResult.approvedSafeCount} / {benchmarkResult.safeCount} approved
+              {benchmarkResult.approvedSafeCount} auto-approved
             </span>
           </div>
         </div>
@@ -3102,7 +3122,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
               </button>
             </div>
 
-            {/* Inspect Sealed Hash Commitment v1 Button */}
+            {/* Inspect Sealed Hash Commitments Button */}
             <button
               onClick={() => setShowSealedV1Commitments((prev) => !prev)}
               className="px-3 py-1.5 bg-purple-950/60 hover:bg-purple-900/70 text-purple-200 font-bold rounded text-xs flex items-center gap-1.5 border border-purple-500/40 transition-colors cursor-pointer"
@@ -3110,8 +3130,8 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
               <Fingerprint className="w-3.5 h-3.5 text-purple-400" />
               <span>
                 {showSealedV1Commitments
-                  ? 'Hide community_seed_v1 Hashes'
-                  : `community_seed_v1 Sealed Hashes (${COMMUNITY_SEED_V1_MERKLE_ROOT})`}
+                  ? 'Hide Sealed Hash Commitments'
+                  : `Sealed Hash Commitments (v1 & v2 Merkle: ${COMMUNITY_SEED_V2_MERKLE_ROOT.slice(0, 8)}…)`}
               </span>
             </button>
 
@@ -3127,25 +3147,66 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
           </div>
         </div>
 
-        {/* Sealed Hash Commitments Inspector Drawer for community_seed_v1 */}
+        {/* Sealed Hash Commitments Inspector Drawer for community_seed_v1 & community_seed_v2 */}
         {showSealedV1Commitments && (
           <div className="mt-3 p-3.5 bg-slate-950 border border-purple-500/40 rounded-lg space-y-2.5 text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
-              <div className="flex items-center gap-2 text-purple-300 font-bold font-mono">
-                <Lock className="w-4 h-4 text-purple-400" />
-                <span>
-                  community_seed_v1 • Cryptographic Pre-Commitment Manifest (Merkle Root: {COMMUNITY_SEED_V1_MERKLE_ROOT}…)
-                </span>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5 text-purple-300 font-bold font-mono">
+                  <Lock className="w-4 h-4 text-purple-400" />
+                  <span>Sealed Cryptographic Pre-Commitment Suites</span>
+                </div>
+                {/* Version Selector Tabs */}
+                <div className="flex items-center rounded bg-slate-900 border border-slate-800 p-0.5">
+                  <button
+                    onClick={() => setSelectedSealedVersion('v2')}
+                    className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold transition-all ${
+                      selectedSealedVersion === 'v2'
+                        ? 'bg-purple-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    community_seed_v2 (Salted Merkle)
+                  </button>
+                  <button
+                    onClick={() => setSelectedSealedVersion('v1')}
+                    className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold transition-all ${
+                      selectedSealedVersion === 'v1'
+                        ? 'bg-purple-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    community_seed_v1 (Raw)
+                  </button>
+                </div>
               </div>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/20 text-purple-200 border border-purple-500/40">
-                24 Cases (12 Risky / 12 Safe) • Plaintext Withheld Until Evaluation Reveal
+                Merkle Root:{' '}
+                {selectedSealedVersion === 'v2'
+                  ? COMMUNITY_SEED_V2_MERKLE_ROOT.slice(0, 16)
+                  : COMMUNITY_SEED_V1_MERKLE_ROOT.slice(0, 16)}
+                … • 24 Cases (12R / 12S)
               </span>
             </div>
             <p className="text-[11px] text-slate-300 leading-relaxed">
-              Because <code className="text-sky-300">community_seed_v0</code> was copied into <code className="text-sky-300">synapseEdgeWatchdog.ts</code> during rule iteration, it is now a regression suite rather than independent held-out evidence. To keep <code className="text-purple-300">community_seed_v1</code> strictly untuned, only the SHA-256 preimage commitments (<code className="text-amber-300">sha256(&quot;&lt;id&gt;:&lt;type&gt;:&lt;change&gt;&quot;)</code>) are published in <code className="text-purple-300">benchmark/cases/community_seed_v1.hashes.json</code>. Run <code className="text-emerald-300">npm run benchmark -- --reveal &lt;file&gt;</code> at evaluation time to verify hashes and score.
+              {selectedSealedVersion === 'v2' ? (
+                <>
+                  <strong className="text-purple-300">community_seed_v2:</strong> Each case is hashed as{' '}
+                  <code className="text-amber-300">SHA-256(&quot;&lt;salt&gt;:&lt;id&gt;:&lt;type&gt;:&lt;change&gt;&quot;)</code>{' '}
+                  with a random 128-bit hex salt and validated against the binary Merkle root{' '}
+                  <code className="text-purple-300 font-mono">{COMMUNITY_SEED_V2_MERKLE_ROOT}</code>. Salting prevents dictionary/rainbow-table attacks against common code snippets.
+                </>
+              ) : (
+                <>
+                  <strong className="text-purple-300">community_seed_v1:</strong> SHA-256 pre-commitments over{' '}
+                  <code className="text-amber-300">sha256(&quot;&lt;id&gt;:&lt;type&gt;:&lt;change&gt;&quot;)</code> with Merkle root{' '}
+                  <code className="text-purple-300 font-mono">{COMMUNITY_SEED_V1_MERKLE_ROOT}</code>. Run{' '}
+                  <code className="text-emerald-300">npm run benchmark -- --reveal &lt;file&gt;</code> at evaluation time to verify hashes and score.
+                </>
+              )}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto font-mono text-[10px] pr-1">
-              {COMMUNITY_SEED_V1_COMMITMENTS.map((item) => (
+              {(selectedSealedVersion === 'v2' ? COMMUNITY_SEED_V2_MANIFEST.cases : COMMUNITY_SEED_V1_MANIFEST.cases).map((item) => (
                 <div
                   key={item.id}
                   className="p-1.5 rounded bg-slate-900 border border-slate-800 flex items-center justify-between gap-2"
@@ -3187,7 +3248,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
           <table className="w-full text-left border-collapse text-[11px]">
             <thead>
               <tr className="border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[10px]">
-                <th className="py-2 px-3 font-semibold">Rule Version</th>
+                <th className="py-2 px-3 font-semibold">Rule Version / Baseline</th>
                 <th className="py-2 px-3 font-semibold">Benchmark Set &amp; Provenance</th>
                 <th className="py-2 px-3 font-semibold">Caught Risky (Block / Esc)</th>
                 <th className="py-2 px-3 font-semibold">Safe Escalation Rate (Cost)</th>
@@ -3196,6 +3257,14 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono">
+              <tr className="bg-rose-950/20 text-rose-300">
+                <td className="py-2 px-3 font-bold">baseline:always-escalate</td>
+                <td className="py-2 px-3 text-slate-400">Fail-Closed Upper Bound Reference</td>
+                <td className="py-2 px-3 text-emerald-400 font-bold">28 / 28 (100% • 0B / 28E)</td>
+                <td className="py-2 px-3 text-rose-400 font-bold">14 / 14 (100% escalated)</td>
+                <td className="py-2 px-3 text-emerald-400">0 / 14 (0%)</td>
+                <td className="py-2 px-3 text-rose-300">Catches 100% of risk at 100% safe operator review burden</td>
+              </tr>
               <tr className={ruleVersion === 'first_version' && suiteType === 'prototype_42' ? 'bg-indigo-950/30' : ''}>
                 <td className="py-2 px-3 text-slate-300 font-bold">First Version (V1 Lexical)</td>
                 <td className="py-2 px-3 text-slate-400">Prototype 42 (Author Template)</td>
@@ -3241,13 +3310,13 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                 </td>
               </tr>
               <tr className={showSealedV1Commitments ? 'bg-purple-950/30' : ''}>
-                <td className="py-2 px-3 text-purple-300 font-bold">Pre-Committed Hash Protocol</td>
-                <td className="py-2 px-3 text-purple-200 font-bold">community_seed_v1 (Merkle: {COMMUNITY_SEED_V1_MERKLE_ROOT})</td>
-                <td className="py-2 px-3 text-purple-300">12 Risky (SHA-256 Sealed)</td>
-                <td className="py-2 px-3 text-purple-300">12 Safe (SHA-256 Sealed)</td>
+                <td className="py-2 px-3 text-purple-300 font-bold">Pre-Committed Merkle Hash</td>
+                <td className="py-2 px-3 text-purple-200 font-bold">community_seed_v2 (Salted Merkle: {COMMUNITY_SEED_V2_MERKLE_ROOT.slice(0, 12)}…)</td>
+                <td className="py-2 px-3 text-purple-300">12 Risky (Salted SHA-256)</td>
+                <td className="py-2 px-3 text-purple-300">12 Safe (Salted SHA-256)</td>
                 <td className="py-2 px-3 text-purple-300">Withheld</td>
                 <td className="py-2 px-3 text-purple-200">
-                  Hashes published now; plaintext withheld until evaluation reveal
+                  Salted binary Merkle tree root committed; plaintext withheld until evaluation reveal
                 </td>
               </tr>
             </tbody>
@@ -3312,7 +3381,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
           {/* Spark Agent Evaluation & Review KPI Row */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3 bg-slate-950 rounded-lg border border-indigo-500/30">
-              <div className="text-[10px] text-slate-400 uppercase">3.1-Pro Evaluator Confidence</div>
+              <div className="text-[10px] text-slate-400 uppercase">Argon Volece Evaluator Confidence</div>
               <div className="text-2xl font-black text-indigo-300 mt-1 tabular-nums">
                 {benchmarkResult.sparkRsiRemodelingReport.meanEvaluatorConfidencePct}%
               </div>
@@ -3385,7 +3454,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                       {cycle.bottleneckIdentified}
                     </div>
                     <div className="text-slate-300">
-                      <strong className="text-indigo-300 font-mono text-[10px]">3.1-Pro Evaluation: </strong>
+                      <strong className="text-indigo-300 font-mono text-[10px]">Argon Evaluation: </strong>
                       {cycle.sparkEvaluatorAnalysis}
                     </div>
                     <div className="text-slate-300">
@@ -3435,7 +3504,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 font-sans mt-0.5">
-                Standardizes how Spark Agents (<code className="text-indigo-300">3.1-Pro Evaluator</code> +{' '}
+                Standardizes how Spark Agents (<code className="text-indigo-300">Argon Volece Evaluator</code> +{' '}
                 <code className="text-sky-300">3.8-Flash Reviewer</code>) validate stability invariants, trigger Watchdog Auto-Remodeling Suggestions (<code className="text-emerald-300">stepBalancedHomeostasis</code>) on benchmark failures, and report data-driven epochs back to the Self-Improvement Engine.
               </p>
             </div>
@@ -4003,7 +4072,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
               </span>
             </span>
             <span className="text-[10px] text-slate-400">
-              Evaluated by <strong className="text-indigo-300">gemini-3.1-pro-preview</strong> &amp;{' '}
+              Evaluated by <strong className="text-indigo-300">gemini-4-argon (Argon Volece)</strong> &amp;{' '}
               <strong className="text-sky-300">gemini-3.8-flash</strong>
             </span>
           </div>
@@ -4049,7 +4118,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                 </div>
 
                 <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[9px] text-slate-400">
-                  <span>3.1-Pro: <strong className={inv.passed ? 'text-emerald-400' : 'text-rose-400'}>{inv.sparkEvaluatorVerdict}</strong></span>
+                  <span>Argon: <strong className={inv.passed ? 'text-emerald-400' : 'text-rose-400'}>{inv.sparkEvaluatorVerdict}</strong></span>
                   <span>3.8-Flash: <strong className={inv.passed ? 'text-emerald-400' : 'text-rose-400'}>{inv.sparkReviewerVerdict}</strong></span>
                   <span className="text-amber-300">{inv.sparkConfidencePct}%</span>
                 </div>
@@ -4365,7 +4434,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                       <div className="truncate">{tc.explanation || 'Evaluated clean via Ghost Protocol'}</div>
                       {tc.sparkEvaluatorVerdict && (
                         <div className="text-[9px] text-emerald-400/90 mt-0.5 flex items-center gap-1.5">
-                          <span>3.1-Pro: {tc.sparkEvaluatorVerdict}</span>
+                          <span>Argon: {tc.sparkEvaluatorVerdict}</span>
                           <span>&bull;</span>
                           <span>3.8-Flash: {tc.sparkReviewerVerdict}</span>
                           {tc.sparkConfidencePct && (

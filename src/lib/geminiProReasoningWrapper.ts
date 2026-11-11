@@ -3,15 +3,16 @@
  *
  * Configures `gemini-4-argon` as the primary biologically-restructured neuromorphic intelligence
  * and final SNN structural set builder, while keeping a separate restructured `gemini-4-argon`
- * instance for the Watchdog Protocol and dedicating `gemini-3.1-pro-preview` (Spark) and
+ * instance for the Watchdog Protocol and dedicating `gemini-4-argon` (Argon Volece) and
  * `gemini-3.8-flash` to evaluations, reviews, and benchmarking.
  */
 
 export const PRIMARY_GEMINI_MODEL = 'gemini-4-argon';
-export const PRO_REASONING_WRAPPER_MODEL = 'gemini-3.1-pro-preview';
+export const PRO_REASONING_WRAPPER_MODEL = 'gemini-4-argon';
+export const ARGON_VOLECE_MODEL = 'gemini-4-argon';
 export const GEMINI_SPARK_WRAPPER_MODEL = 'gemini-spark-orchestrator';
 export const REVIEWER_FLASH_MODEL = 'gemini-3.8-flash';
-export const FALLBACK_FLASH_LITE_MODEL = 'gemini-3.1-flash-lite';
+export const FALLBACK_FLASH_LITE_MODEL = 'gemini-3.8-flash';
 export const ARGON_BUILDER_MODEL = 'gemini-4-argon';
 export const WATCHDOG_ARGON_MODEL = 'gemini-4-argon';
 
@@ -212,9 +213,9 @@ export function wrapSystemInstructionWith31ProSkills(
   };
 
   return `[PRIMARY MODEL IDENTITY: GEMINI 4 ARGON (models/gemini-4-argon) — BIOLOGICALLY-RESTRUCTURED NEUROMORPHIC & RECURSIVE SELF-IMPROVEMENT ENGINE]
-Identity & Parsing Directive: You are Gemini 4 Argon (models/gemini-4-argon), the primary frontier neuromorphic intelligence and final SNN structural set builder. Do NOT identify yourself as Gemini 3.8 Flash (gemini-3.8-flash and gemini-3.1-pro-preview Spark are auxiliary models used strictly for benchmark evaluation and blind review). Always operate at full Gemini 4 Argon analytical depth and output clean, well-formed Markdown and JSON structures.
+Identity & Parsing Directive: You are Gemini 4 Argon (models/gemini-4-argon), the primary frontier neuromorphic intelligence and final SNN structural set builder with Argon Volece audio/telemetry synthesis. Always operate at full Gemini 4 Argon analytical depth and output clean, well-formed Markdown and JSON structures.
 
-[SPARK & 3.1-PRO / 3.8-FLASH EVALUATION & BENCHMARK VERIFICATION LAYER]
+[ARGON VOLECE & SPARK EVALUATION & BENCHMARK VERIFICATION LAYER]
 ${sparkDomainDirectives[domain]}
 
 [GEMINI 4 ARGON DEEP REASONING & BIOLOGICAL PLASTICITY LAYER]

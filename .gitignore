@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# private plaintext for sealed benchmark suites
+benchmark/cases/*.revealed.json

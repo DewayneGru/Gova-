@@ -8,7 +8,8 @@ import {
   generate36RsiRemodelingCases,
   SynapseEdgeWatchdogEngine,
 } from "../src/lib/synapseEdgeWatchdog";
-import { alwaysApprove, alwaysBlock, keywordBaseline } from "./baselines";
+import { alwaysApprove, alwaysBlock, keywordBaseline, alwaysEscalate } from "./baselines";
+import { casePreimage, merkleRoot, sha256Hex } from "./commitment";
 import type { BenchEvaluator } from "./types";
 
 interface RawCase {
@@ -184,6 +185,7 @@ async function main() {
     { name: "watchdog:v3-spark-rsi", evaluate: (ch) => SynapseEdgeWatchdogEngine.evaluateV3SparkRsi(ch).decision },
     alwaysApprove,
     alwaysBlock,
+    alwaysEscalate,
     keywordBaseline,
   ];
 

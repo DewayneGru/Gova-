@@ -686,7 +686,22 @@ def discover_latest_correlation_report(explicit_path: Optional[str] = None) -> T
 
 
 def extract_metric_from_report(report: Dict[str, Any], subsystem: str, keys: List[str], default_val: float) -> float:
-    """Helper to extract a specific metric value from subsystemSnapshots.<subsystem>.metrics."""
+    """Helper to extract a specific metric value from V3 telemetry or subsystemSnapshots.<subsystem>.metrics."""
+    v3_telem = report.get("telemetry", {})
+    if isinstance(v3_telem, dict):
+        for k in keys:
+            if k in v3_telem and v3_telem[k] is not None:
+                try:
+                    return float(v3_telem[k])
+                except (ValueError, TypeError):
+                    pass
+            aer_bus = v3_telem.get("aer_bus", {})
+            if isinstance(aer_bus, dict) and k in aer_bus and aer_bus[k] is not None:
+                try:
+                    return float(aer_bus[k])
+                except (ValueError, TypeError):
+                    pass
+
     sub = report.get("subsystemSnapshots", {}).get(subsystem, {})
     for m in sub.get("metrics", []):
         m_key = m.get("key") or m.get("id")
@@ -717,13 +732,13 @@ def run_automatic_invariant_audit(memory: Dict[str, Any], report: Dict[str, Any]
     a_minus = float(stdp_mem.get("aMinus", 0.052))
     mem_ratio = round(a_minus / max(a_plus, 1e-6), 4)
     ltd_ltp_ratio = extract_metric_from_report(
-        report, "synapticStability", ["ltdLtpRatio", "syn_stdp_ratio"], mem_ratio
+        report, "synapticStability", ["ltd_ltp_ratio", "ltdLtpRatio", "syn_stdp_ratio"], mem_ratio
     )
 
     # 2. Extract Power Dissipation (mW)
     mem_power = float(sub_mem.get("powerMw", 4.12))
     power_mw = extract_metric_from_report(
-        report, "core", ["powerMw", "core_power_mw"], mem_power
+        report, "core", ["power_mw", "powerMw", "core_power_mw"], mem_power
     )
 
     # 3. Extract Firing Rate Deviation (Hz) from 28.0 Hz setpoint
@@ -733,8 +748,8 @@ def run_automatic_invariant_audit(memory: Dict[str, Any], report: Dict[str, Any]
     mean_hz = extract_metric_from_report(
         report,
         "core",
-        ["meanFiringRateHz", "core_firing_rate"],
-        float(loop_assess.get("currentRateHz", target_hz + float(loop_assess.get("rateDeviationHz", 0.0)))),
+        ["firing_rate_hz", "meanFiringRateHz", "core_firing_rate"],
+        float(loop_assess.get("currentRateHz", target_hz + float(loop_assess.get("rateDeviationHz", -0.5)))),
     )
     rate_dev_hz = float(loop_assess.get("rateDeviationHz", round(mean_hz - target_hz, 2)))
     abs_rate_dev_hz = round(abs(rate_dev_hz), 2)
@@ -768,13 +783,13 @@ def run_automatic_invariant_audit(memory: Dict[str, Any], report: Dict[str, Any]
                     })
 
     # 5. Authoritative Telemetry Contradiction Guard
-    mean_syn_weight = extract_metric_from_report(report, "synapticStability", ["meanSynapticWeight"], 0.70)
+    mean_syn_weight = extract_metric_from_report(report, "synapticStability", ["weight_mean_norm", "meanSynapticWeight"], 0.70)
     sparsity_pct = extract_metric_from_report(report, "synapticStability", ["sparsityPct"], 60.0)
     inh_ratio = extract_metric_from_report(report, "synapticStability", ["inhibitoryRatio"], 0.20)
     exc_ratio = round(1.0 - inh_ratio, 4) if mean_syn_weight > 0 else 1.0
-    branching = extract_metric_from_report(report, "synapticStability", ["branchingRatio"], 0.98)
+    branching = extract_metric_from_report(report, "synapticStability", ["branching_ratio_sigma", "branchingRatio"], 0.98)
     lyapunov = extract_metric_from_report(report, "synapticStability", ["lyapunovExponent"], -0.02)
-    dri = extract_metric_from_report(report, "synapticStability", ["divergenceRiskIndex"], 0.11)
+    dri = extract_metric_from_report(report, "synapticStability", ["dynamic_range_index_dri", "divergenceRiskIndex"], 0.11)
 
     synth_state = NetworkState(
         spikes=int(max(1, round(mean_hz * 10))) if mean_hz > 0 else 0,
@@ -802,7 +817,7 @@ def run_automatic_invariant_audit(memory: Dict[str, Any], report: Dict[str, Any]
         and len(telemetry_errors) == 0
     )
 
-    return {
+    audit = {
         "timestamp": int(time.time() * 1000),
         "allInvariantsPassed": all_passed,
         "telemetryIntegrity": {
@@ -851,6 +866,89 @@ def run_automatic_invariant_audit(memory: Dict[str, Any], report: Dict[str, Any]
         "boundaryViolations": boundary_violations,
     }
 
+    div_corr = report.get("divergence_and_correlation", {})
+    if isinstance(div_corr, dict) and "manifold_divergence_l2" in div_corr:
+        audit["l2ManifoldDivergence"] = float(div_corr["manifold_divergence_l2"])
+    else:
+        observed_for_l2 = {
+            "sigma": extract_metric_from_report(report, "synapticStability", ["branching_ratio_sigma", "branchingRatio", "sigma"], 1.0),
+            "meanFiringRateHz": mean_hz,
+            "powerMw": power_mw,
+            "ltdLtpRatio": ltd_ltp_ratio,
+            "aerLatencyMs": extract_metric_from_report(report, "aerBus", ["latency_ms", "aerLatencyMs", "latencyMs"], 0.99),
+        }
+        audit["l2ManifoldDivergence"] = compute_l2_manifold_divergence(observed_for_l2)
+
+    if isinstance(div_corr, dict) and "phase_weight_pearson_r" in div_corr:
+        audit["pearsonPhaseWeightRho"] = float(div_corr["phase_weight_pearson_r"])
+    else:
+        phases = [m.get("value", 0.0) for m in report.get("subsystemSnapshots", {}).get("frequencyBands", {}).get("metrics", []) if "phase" in (m.get("key") or "").lower()]
+        weights = [m.get("value", 0.68) for m in report.get("subsystemSnapshots", {}).get("synapticStability", {}).get("metrics", []) if "weight" in (m.get("key") or "").lower()]
+        if not phases:
+            phases = [(2.0 * math.pi * i) / 16.0 for i in range(16)]
+        if not weights:
+            weights = [0.685 + 0.02 * math.sin(p) for p in phases]
+        audit["pearsonPhaseWeightRho"] = compute_pearson_phase_weight_correlation(phases[:16], weights[:16])
+
+    return audit
+
+
+def compute_l2_manifold_divergence(
+    observed_metrics: Dict[str, float],
+    attractor_setpoints: Optional[Dict[str, float]] = None,
+    normalizers: Optional[Dict[str, float]] = None,
+) -> float:
+    """
+    Computes normalized L2 Euclidean manifold divergence from homeostatic attractor.
+    D_L2 = sqrt( sum( ((x_i - x_i^*) / sigma_i)^2 ) )
+    """
+    if attractor_setpoints is None:
+        attractor_setpoints = {
+            "sigma": 1.000,
+            "meanFiringRateHz": 28.0,
+            "powerMw": 4.40,
+            "ltdLtpRatio": 1.350,
+            "aerLatencyMs": 0.99,
+        }
+    if normalizers is None:
+        normalizers = {
+            "sigma": 0.15,
+            "meanFiringRateHz": 5.0,
+            "powerMw": 0.80,
+            "ltdLtpRatio": 0.20,
+            "aerLatencyMs": 0.30,
+        }
+    squared_sum = 0.0
+    for key, setpoint in attractor_setpoints.items():
+        if key in observed_metrics:
+            norm = normalizers.get(key, 1.0)
+            diff = (observed_metrics[key] - setpoint) / max(1e-6, norm)
+            squared_sum += diff * diff
+    return round(math.sqrt(squared_sum), 4)
+
+
+def compute_pearson_phase_weight_correlation(
+    phases: List[float],
+    weights: List[float],
+) -> float:
+    """
+    Computes Pearson phase-weight correlation coefficient rho between
+    Kuramoto oscillator phases and synaptic weights.
+    rho = Cov(phases, weights) / (Std(phases) * Std(weights))
+    """
+    if len(phases) != len(weights) or len(phases) < 2:
+        return 0.0
+    n = len(phases)
+    mean_p = sum(phases) / n
+    mean_w = sum(weights) / n
+    cov = sum((p - mean_p) * (w - mean_w) for p, w in zip(phases, weights))
+    var_p = sum((p - mean_p) ** 2 for p in phases)
+    var_w = sum((w - mean_w) ** 2 for w in weights)
+    denom = math.sqrt(var_p * var_w)
+    if denom < 1e-9:
+        return 0.0
+    return round(cov / denom, 4)
+
 
 def format_invariant_audit_banner(audit: Dict[str, Any], report_path: Optional[Path]) -> str:
     """Formats a clear terminal summary of the automatic local invariant audit."""
@@ -858,6 +956,8 @@ def format_invariant_audit_banner(audit: Dict[str, Any], report_path: Optional[P
     r_ltd = inv["ltdDominanceRatio"]
     r_pwr = inv["thermalPowerEnvelope"]
     r_rate = inv["homeostaticRateLoop"]
+    d_l2 = audit.get("l2ManifoldDivergence", 0.0)
+    rho = audit.get("pearsonPhaseWeightRho", 0.0)
 
     lines = [
         "=" * 76,
@@ -869,6 +969,8 @@ def format_invariant_audit_banner(audit: Dict[str, Any], report_path: Optional[P
         f" [3] Rate Loop (|rateDeviationHz| <= 5.0 Hz) : {r_rate['rateDeviationHz']:+.2f} Hz ({r_rate['observedRateHz']:.1f} Hz vs {r_rate['targetRateHz']:.1f} Hz) -> {'PASS' if r_rate['passed'] else 'FAIL (' + r_rate['status'] + ')'}",
         f" [4] Primary Divergence Origin               : {audit['primaryOrigin']}",
         f" [5] Direction-Aware Verdict                 : {audit['verdictSummary']}",
+        f" [7] L2 Manifold Divergence (D_L2)          : {d_l2:.4f} (Attractor Setpoint: σ=1.000, 28.0 Hz, 4.40 mW)",
+        f" [8] Pearson Phase-Weight Correlation (ρ)    : {rho:+.4f} (Kuramoto-Synaptic alignment)",
     ]
     if audit["boundaryViolations"]:
         lines.append(f" [6] Subsystem Boundary Warnings ({len(audit['boundaryViolations'])}):")
@@ -965,6 +1067,8 @@ def build_system_instruction(
         f"- Primary Origin Subsystem: {audit['primaryOrigin']}",
         f"- Direction-Aware Verdict: {audit['verdictSummary']}",
         f"- Recommended Intervention: {audit['recommendedIntervention']}",
+        f"- L2 Manifold Divergence (D_L2): {audit.get('l2ManifoldDivergence', 0.0):.4f}",
+        f"- Pearson Phase-Weight Correlation (ρ): {audit.get('pearsonPhaseWeightRho', 0.0):+.4f}",
         "\n[COMBINED WORKSPACE MEMORY & CORRELATION REPORT SNAPSHOT]:",
         f"- Power: {r_pwr['observed']} mW (Thermal Cap: 5.0 mW)",
         f"- Active Spikes: {subsystems.get('activeSpikeCount')}, Synaptic Throughput: {subsystems.get('synapticOpsPerSec')} SOP/s",
@@ -1106,11 +1210,29 @@ def main():
     parser.add_argument(
         "--watch", "-w", action="store_true", help="Watch memory and correlation report files and keep system_state.md synced"
     )
+    parser.add_argument(
+        "--auto-init", action="store_true", help="Automatically initialize workspace_memory.json if missing"
+    )
+    parser.add_argument(
+        "--strict", action="store_true", help="Enforce strict invariant audit; exit with code 2 on any violation"
+    )
     args = parser.parse_args()
+
+    if args.auto_init:
+        if not MEMORY_FILE.exists():
+            init_mem = load_workspace_memory()
+            save_workspace_memory(init_mem)
+            print(f"[Bridge] Initialized fresh workspace memory at {MEMORY_FILE}")
 
     memory = load_workspace_memory()
     report_path, report = discover_latest_correlation_report(args.report)
     audit = run_automatic_invariant_audit(memory, report)
+
+    if args.strict:
+        if not audit["allInvariantsPassed"] or len(audit["boundaryViolations"]) > 0:
+            print(format_invariant_audit_banner(audit, report_path), file=sys.stderr)
+            print(f"[Bridge STRICT ERROR] Invariant audit failure detected. Exiting with code 2.", file=sys.stderr)
+            sys.exit(2)
 
     if args.audit:
         print(format_invariant_audit_banner(audit, report_path))

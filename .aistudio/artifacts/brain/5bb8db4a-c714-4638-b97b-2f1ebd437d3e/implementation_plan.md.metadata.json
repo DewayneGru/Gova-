@@ -1,6 +1,0 @@
-{
-  "summary":  "SynapseEdge vNext Hardening & Measurement Integrity Plan covering:\n1. Fail-Closed Watchdog Architecture & Community Seed Generalization (escalating unrecognized proposals unless explicitly safe-matched).\n2. Strict Control vs. Measured Telemetry Separation (refactoring closedLoopHomeostasis to output control deltas only, preserving independent measurement and provenance).\n3. Express API Authentication & Per-IP Rate Limiting (requiring Firebase auth on state-mutating and export routes, and rate-limiting AI consumption routes).\n4. Empirical SAE Matrix Orthogonality Calculation & CI Workflow Alignment (replacing hardcoded 0.998/0.0 diagnostics with live cosine-similarity Gram-Schmidt inner-product calculations and aligning CI with Vite, esbuild, TypeScript, and benchmark validation).",
-  "updatedAt":  "2026-11-10T18:36:25.663877421Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}
