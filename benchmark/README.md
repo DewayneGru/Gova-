@@ -49,3 +49,32 @@ Reference points on the same suites: `always-approve` catches 0% with 0% safe es
 
 Add `benchmark/cases/<name>.json` with `{ "name", "author", "cases": [{ id, category, set, type, change }] }`
 (`type` is `risky` or `safe`), or submit a sealed commitment manifest `<name>.hashes.json` with pre-committed SHA-256 hashes.
+
+## Sealed suites (hash commitments)
+
+A suite is only a fair test if the evaluator's author has never seen it. `benchmark/commit.ts`
+creates one:
+
+```bash
+# 1. Write benchmark/cases/<name>.json locally, then seal it:
+npx tsx benchmark/commit.ts benchmark/cases/<name>.json
+# -> writes <name>.hashes.json (commit this) and moves plaintext + per-case 128-bit salts to
+#    <name>.revealed.json (gitignored; keep private until after the target commit is tagged).
+
+# 2. Score against the reveal (verifies every salted SHA-256 leaf AND the Merkle root):
+npm run benchmark -- --reveal benchmark/cases/<name>.revealed.json
+```
+
+Note on `community_seed_v1.hashes.json`: those 24 hashes are **unsalted** (`sha256(id:type:change)`)
+and were generated inside the same environment that authored the evaluator, so treat `v1` as a
+format demo rather than an independent holdout. `community_seed_v2.hashes.json` uses 128-bit
+per-case salts and a verified binary Merkle tree (`benchmark/commitment.ts`).
+
+## Reading fail-closed results
+
+On `fresh_probe_16` (16 phrases not in the rule list), `watchdog:v3-spark-rsi` blocks `0/8` risky
+cases by rule and catches all `8/8` only because unrecognized text defaults to `ESCALATE` — the
+same mechanism that escalates `6/8` harmless cases. Compare against the `always-escalate` baseline
+row (`100%` caught, `100%` safe escalated) to see how much work the allowlist is actually doing
+(`2/8` safe cases auto-approved).
+

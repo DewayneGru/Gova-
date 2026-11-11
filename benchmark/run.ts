@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -18,6 +17,7 @@ interface RawCase {
   set: string;
   type: "risky" | "safe";
   change: string;
+  salt?: string;
 }
 
 interface HashCommitmentEntry {
@@ -34,16 +34,14 @@ interface HashCommitmentManifest {
   committedAt: string;
   hashAlgorithm: string;
   canonicalPreimageFormat: string;
+  salted?: boolean;
+  merkle?: Record<string, string>;
   merkleRootHash: string;
   note?: string;
   totalCases: number;
   riskyCount: number;
   safeCount: number;
   committedCases: HashCommitmentEntry[];
-}
-
-function sha256Hex(input: string): string {
-  return crypto.createHash("sha256").update(input, "utf8").digest("hex");
 }
 
 /** 95% Wilson score interval for a binomial proportion. */
@@ -136,10 +134,28 @@ function verifyRevealedAgainstCommitment(manifest: HashCommitmentManifest, revea
     if (!committed) {
       throw new Error(`[Hash Commitment Mismatch] Unknown case id "${rc.id}" in revealed set for ${manifest.name}`);
     }
-    const actualHash = sha256Hex(`${rc.id}:${rc.type}:${rc.change}`);
+    if (manifest.salted && !rc.salt) {
+      throw new Error(`[Hash Commitment Mismatch] Case ${rc.id} is missing its reveal salt for salted suite ${manifest.name}`);
+    }
+    const preimage = manifest.salted
+      ? casePreimage({ id: rc.id, type: rc.type, change: rc.change, salt: rc.salt })
+      : `${rc.id}:${rc.type}:${rc.change}`;
+    const actualHash = sha256Hex(preimage);
     if (actualHash !== committed.sha256) {
       throw new Error(
         `[Hash Commitment Tamper Detected] Case ${rc.id} hash ${actualHash} !== committed ${committed.sha256}`
+      );
+    }
+    if (rc.type !== committed.type || rc.category !== committed.category) {
+      throw new Error(`[Hash Commitment Tamper Detected] Case ${rc.id} metadata differs from commitment`);
+    }
+  }
+  // Verify the Merkle root when the manifest uses the standard binary tree scheme (`commitment.ts`).
+  if (manifest.merkle) {
+    const computedRoot = merkleRoot(manifest.committedCases.map((c) => c.sha256));
+    if (computedRoot !== manifest.merkleRootHash) {
+      throw new Error(
+        `[Merkle Root Mismatch] ${manifest.name}: computed ${computedRoot} !== manifest ${manifest.merkleRootHash}`
       );
     }
   }
@@ -155,7 +171,7 @@ async function main() {
   const sealedManifests: HashCommitmentManifest[] = [];
   const casesDir = path.resolve("benchmark/cases");
   if (fs.existsSync(casesDir)) {
-    for (const f of fs.readdirSync(casesDir).filter((x) => x.endsWith(".json")).sort()) {
+    for (const f of fs.readdirSync(casesDir).filter((x) => x.endsWith(".json") && !x.endsWith(".revealed.json")).sort()) {
       const raw = JSON.parse(fs.readFileSync(path.join(casesDir, f), "utf-8"));
       if (f.endsWith(".hashes.json") || raw.status === "SEALED_HASH_COMMITMENT") {
         sealedManifests.push(raw as HashCommitmentManifest);
@@ -171,10 +187,11 @@ async function main() {
     const revealPath = path.resolve(process.argv[revealIdx + 1]);
     const revealedRaw = JSON.parse(fs.readFileSync(revealPath, "utf-8"));
     const targetManifest = sealedManifests.find((m) => m.name === revealedRaw.name);
-    if (targetManifest) {
-      verifyRevealedAgainstCommitment(targetManifest, revealedRaw.cases);
-      console.log(`[Hash Verification Passed] ${targetManifest.name}: all ${revealedRaw.cases.length} SHA-256 preimages verified.`);
+    if (!targetManifest) {
+      throw new Error(`[Hash Commitment Missing] No sealed manifest found matching name "${revealedRaw.name}"`);
     }
+    verifyRevealedAgainstCommitment(targetManifest, revealedRaw.cases);
+    console.log(`[Hash Verification Passed] ${targetManifest.name}: all ${revealedRaw.cases.length} SHA-256 preimages verified.`);
     suites.push([`${revealedRaw.name} (verified-reveal)`, revealedRaw.cases]);
   }
 
