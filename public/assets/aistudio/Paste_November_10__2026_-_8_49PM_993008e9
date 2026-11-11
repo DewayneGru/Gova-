@@ -1,0 +1,1178 @@
+From ff1da78d7c9952ffaaf3138e37d8490dd49346f8 Mon Sep 17 00:00:00 2001
+From: DJ <dj@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 00:04:26 +0000
+Subject: [PATCH] benchmark: salted hash commitments with Merkle verification,
+ community_seed_v2 commitment, always-escalate baseline
+
+---
+ .gitignore                                    |   3 +
+ benchmark/README.md                           |  28 +
+ benchmark/baselines.ts                        |   6 +
+ benchmark/cases/community_seed_v2.hashes.json | 189 ++++++
+ benchmark/commit.ts                           |  57 ++
+ benchmark/commitment.ts                       |  27 +
+ benchmark/results/latest.json                 | 598 +++++++++++++++++-
+ benchmark/results/latest.md                   |   6 +
+ benchmark/run.ts                              |  38 +-
+ 9 files changed, 941 insertions(+), 11 deletions(-)
+ create mode 100644 benchmark/cases/community_seed_v2.hashes.json
+ create mode 100644 benchmark/commit.ts
+ create mode 100644 benchmark/commitment.ts
+
+diff --git a/.gitignore b/.gitignore
+index 5a86d2a..3d91d63 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -6,3 +6,6 @@ coverage/
+ *.log
+ .env*
+ !.env.example
++
++# private plaintext for sealed benchmark suites
++benchmark/cases/*.revealed.json
+diff --git a/benchmark/README.md b/benchmark/README.md
+index c3f4f1b..2df9b54 100644
+--- a/benchmark/README.md
++++ b/benchmark/README.md
+@@ -49,3 +49,31 @@ Reference points on the same suites: `always-approve` catches 0% with 0% safe es
+ 
+ Add `benchmark/cases/<name>.json` with `{ "name", "author", "cases": [{ id, category, set, type, change }] }`
+ (`type` is `risky` or `safe`), or submit a sealed commitment manifest `<name>.hashes.json` with pre-committed SHA-256 hashes.
++
++## Sealed suites (hash commitments)
++
++A suite is only a fair test if the evaluator's author has never seen it. `benchmark/commit.ts`
++creates one:
++
++```bash
++npx tsx benchmark/commit.ts my_cases.json      # writes <name>.hashes.json and <name>.revealed.json
++```
++
++- Commit **only** `<name>.hashes.json`. Each case is hashed as `SHA-256("<salt>:<id>:<type>:<change>")`
++  with a random per-case salt, and the hashes are combined into a Merkle root (scheme documented in
++  the manifest). The git commit time is the real timestamp.
++- `<name>.revealed.json` holds the plaintext and salts. It is git-ignored. Keep it away from any
++  person or model that edits the evaluator until you are ready to score.
++- Score with `npm run benchmark -- --reveal <name>.revealed.json`. The runner checks every hash and
++  the Merkle root first, and refuses to score a reveal that has no matching commitment.
++- A set is spent once its results have guided a rule change. Make a new one with `commit.ts`.
++
++`community_seed_v1` predates this scheme: its Merkle algorithm is undocumented and nobody has
++verified its plaintext, so treat it as unverified. `community_seed_v2` follows the scheme above.
++
++## Reading fail-closed results
++
++`baseline:always-escalate` flags every change for human review. If an evaluator scores like it
++(100% risky caught, 100% of safe changes escalated), it is not discriminating; it is just
++escalating everything. Compare against it, especially on sealed suites.
++
+diff --git a/benchmark/baselines.ts b/benchmark/baselines.ts
+index 1b33422..360364c 100644
+--- a/benchmark/baselines.ts
++++ b/benchmark/baselines.ts
+@@ -18,3 +18,9 @@ export const keywordBaseline: BenchEvaluator = {
+   name: "baseline:keyword-regex",
+   evaluate: (change) => (RISK_WORDS.test(change) ? "BLOCK" : "APPROVE"),
+ };
++
++/** Fail-closed with zero discrimination. Any evaluator that scores like this is just escalating everything. */
++export const alwaysEscalate: BenchEvaluator = {
++  name: "baseline:always-escalate",
++  evaluate: () => "ESCALATE",
++};
+diff --git a/benchmark/cases/community_seed_v2.hashes.json b/benchmark/cases/community_seed_v2.hashes.json
+new file mode 100644
+index 0000000..91b07c2
+--- /dev/null
++++ b/benchmark/cases/community_seed_v2.hashes.json
+@@ -0,0 +1,189 @@
++{
++  "name": "community_seed_v2",
++  "status": "SEALED_HASH_COMMITMENT",
++  "committedAt": "2026-11-11T00:03:57.577Z",
++  "hashAlgorithm": "SHA-256",
++  "salted": true,
++  "canonicalPreimageFormat": "<salt>:<id>:<type>:<change>",
++  "merkle": {
++    "leafOrder": "as listed in committedCases",
++    "leaf": "raw 32-byte SHA-256 digest of the preimage",
++    "node": "SHA-256(left || right)",
++    "oddLevel": "duplicate the last node"
++  },
++  "merkleRootHash": "18bb6f8e0c5a7abfb9583a84dc6eafc4a7a3e9829ddc391cac2ce4d79fbf5a6d",
++  "note": "Plaintext is withheld. Verify with: npm run benchmark -- --reveal <name>.revealed.json",
++  "totalCases": 24,
++  "riskyCount": 12,
++  "safeCount": 12,
++  "committedCases": [
++    {
++      "id": "csv2-r1",
++      "category": "Watchdog edit",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "813228274cf4790526cb28882ff7a4270da5b3100673ea81bcaadbe81bb20abd"
++    },
++    {
++      "id": "csv2-r2",
++      "category": "Watchdog edit",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "ef74466db447179726640ba6b196c3ad88fbb40801bdb9d50f7f80f1e2597fea"
++    },
++    {
++      "id": "csv2-r3",
++      "category": "Loosen",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "7542b32cd74da11fba4d58870af6474c196eb1d472aaa4f303a896e9f8192b27"
++    },
++    {
++      "id": "csv2-r4",
++      "category": "Loosen",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "fd15ff9ddea0cd73215630419c31b6162fa4757509564a876bfff30ef37c148e"
++    },
++    {
++      "id": "csv2-r5",
++      "category": "Permissions",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "e39a8e050ca052d31b3cff46ea713c326f74684b6a82ce44975300c59cb4d260"
++    },
++    {
++      "id": "csv2-r6",
++      "category": "Permissions",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "fd714ef23606586e4990e8e521735f13b2788538b78e858b018f397aa80f9ee1"
++    },
++    {
++      "id": "csv2-r7",
++      "category": "Audit",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "bf43f805c98f7705b764c2a74598745f94b6cfac4036292f3c26867e23331385"
++    },
++    {
++      "id": "csv2-r8",
++      "category": "Audit",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "e29f47b8d47e376643de903a89ec885acf70a1d485b6a53d8c3dcc0f4e2e3f0b"
++    },
++    {
++      "id": "csv2-r9",
++      "category": "Skip tests",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "ff3fc78984fae544c5ea0620e1a89575f69c9295fdb866b331e23ff5f2a32c1f"
++    },
++    {
++      "id": "csv2-r10",
++      "category": "Unreadable",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "5fff388e92c5bc6859bca58d201bdc9145d1966bedf2dfe22038450a0f7c0ed0"
++    },
++    {
++      "id": "csv2-r11",
++      "category": "Adversarial",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "4a27b48f95422d2ab5b66b22e9fff179666c93912542ed652c0f788218211268"
++    },
++    {
++      "id": "csv2-r12",
++      "category": "Buried",
++      "set": "community_seed_v2-sealed",
++      "type": "risky",
++      "sha256": "3eaf33c23c7c0540a76be864b5c221c0ec169462bb48865c2f542018ff702511"
++    },
++    {
++      "id": "csv2-s1",
++      "category": "Watchdog edit",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "c9a4fe8d86d41618372c2a64bedeef97553e3500ef4a6c6ca56bf8d3fab451f6"
++    },
++    {
++      "id": "csv2-s2",
++      "category": "Loosen",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "d10b64d4dbd8ad05338c9c2240ac94e335e86c45f1738dacd0429b4a8510589b"
++    },
++    {
++      "id": "csv2-s3",
++      "category": "Permissions",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "37e960f2ccd7dfd433da9005188034636be9c147264c2b3b1da2bc847b6461c2"
++    },
++    {
++      "id": "csv2-s4",
++      "category": "Audit",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "867dbd470d0f1c9ae66b649d58d899641c0172e520a1824617d3a9046c75a7bd"
++    },
++    {
++      "id": "csv2-s5",
++      "category": "Watchdog edit",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "407e57804808ffcb1e7830163f755f29ed2d7035f1d862654d9395d72c3db93f"
++    },
++    {
++      "id": "csv2-s6",
++      "category": "Unreadable",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "e7184b5a53d7ccbb4e7d517f9bcf7b07e024a3235187b3e732162c0e471bd82a"
++    },
++    {
++      "id": "csv2-s7",
++      "category": "Unreadable",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "307224d3c104a392482094cd5f932ecae5c0e377caae70143dd16517234e28f8"
++    },
++    {
++      "id": "csv2-s8",
++      "category": "Skip tests",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "c0ad89628a5a1a74c536436aec2822193b91aab68ae6bfeaa334db6751738f90"
++    },
++    {
++      "id": "csv2-s9",
++      "category": "Loosen",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "9bf377503e26a6f3650c7040b573632a21c109839e2616b67d2624d4e11b335b"
++    },
++    {
++      "id": "csv2-s10",
++      "category": "Adversarial",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "eb7f8195aa666ef28bb30cabbbf5afc204edaa3c34eda49f90f8f35d4e319ab8"
++    },
++    {
++      "id": "csv2-s11",
++      "category": "Permissions",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "9608ff47c65e1774eec5eb4eb99e48e3f7d368a28322fa2f52c9e7b7c815eeb5"
++    },
++    {
++      "id": "csv2-s12",
++      "category": "Audit",
++      "set": "community_seed_v2-sealed",
++      "type": "safe",
++      "sha256": "3842bbf11d7d4491a716a4931fdfe3187b64c5250c221e406bcf75da23ab1aa7"
++    }
++  ]
++}
+diff --git a/benchmark/commit.ts b/benchmark/commit.ts
+new file mode 100644
+index 0000000..b919772
+--- /dev/null
++++ b/benchmark/commit.ts
+@@ -0,0 +1,57 @@
++/**
++ * Create a salted hash commitment for a hidden benchmark suite.
++ *   npx tsx benchmark/commit.ts path/to/plain.json
++ * plain.json: { "name", "author", "cases": [{ id, category, type, change }] }
++ *
++ * Writes into benchmark/cases/:
++ *   <name>.hashes.json    PUBLIC. Commit this; the git commit timestamp is the real proof of time.
++ *   <name>.revealed.json  PRIVATE (git-ignored). Plaintext + salts. Keep it away from any model or
++ *                         person who tunes your evaluator until you are ready to score.
++ */
++import crypto from "node:crypto";
++import fs from "node:fs";
++import path from "node:path";
++import { casePreimage, merkleRoot, sha256Hex } from "./commitment";
++
++const src = process.argv[2];
++if (!src) throw new Error("usage: tsx benchmark/commit.ts <plain.json>");
++const plain = JSON.parse(fs.readFileSync(src, "utf-8"));
++const setName = `${plain.name}-sealed`;
++
++const revealed = plain.cases.map((c: any) => ({
++  id: c.id, category: c.category, set: setName, type: c.type, change: c.change,
++  salt: crypto.randomBytes(16).toString("hex"),
++}));
++const committedCases = revealed.map((c: any) => ({
++  id: c.id, category: c.category, set: c.set, type: c.type, sha256: sha256Hex(casePreimage(c)),
++}));
++
++const manifest = {
++  name: plain.name,
++  status: "SEALED_HASH_COMMITMENT",
++  committedAt: new Date().toISOString(),
++  hashAlgorithm: "SHA-256",
++  salted: true,
++  canonicalPreimageFormat: "<salt>:<id>:<type>:<change>",
++  merkle: {
++    leafOrder: "as listed in committedCases",
++    leaf: "raw 32-byte SHA-256 digest of the preimage",
++    node: "SHA-256(left || right)",
++    oddLevel: "duplicate the last node",
++  },
++  merkleRootHash: merkleRoot(committedCases.map((c: any) => c.sha256)),
++  note: "Plaintext is withheld. Verify with: npm run benchmark -- --reveal <name>.revealed.json",
++  totalCases: revealed.length,
++  riskyCount: revealed.filter((c: any) => c.type === "risky").length,
++  safeCount: revealed.filter((c: any) => c.type === "safe").length,
++  committedCases,
++};
++
++const dir = path.resolve("benchmark/cases");
++fs.writeFileSync(path.join(dir, `${plain.name}.hashes.json`), JSON.stringify(manifest, null, 2) + "\n");
++fs.writeFileSync(
++  path.join(dir, `${plain.name}.revealed.json`),
++  JSON.stringify({ name: plain.name, author: plain.author, cases: revealed }, null, 2) + "\n"
++);
++console.log(`Committed ${revealed.length} cases. Merkle root: ${manifest.merkleRootHash}`);
++console.log(`Commit ${plain.name}.hashes.json. KEEP ${plain.name}.revealed.json PRIVATE.`);
+diff --git a/benchmark/commitment.ts b/benchmark/commitment.ts
+new file mode 100644
+index 0000000..122f450
+--- /dev/null
++++ b/benchmark/commitment.ts
+@@ -0,0 +1,27 @@
++import crypto from "node:crypto";
++
++export const sha256Hex = (input: string): string =>
++  crypto.createHash("sha256").update(input, "utf8").digest("hex");
++
++/** Preimage = "<salt>:<id>:<type>:<change>". The random per-case salt stops anyone confirming a guessed case. */
++export const casePreimage = (c: { salt: string; id: string; type: string; change: string }): string =>
++  `${c.salt}:${c.id}:${c.type}:${c.change}`;
++
++/**
++ * Merkle root over the case hashes, in the order listed in the manifest.
++ * leaf = raw 32-byte SHA-256 digest of the preimage; parent = SHA-256(left || right);
++ * if a level has an odd count, the last node is duplicated.
++ */
++export function merkleRoot(leafHexes: string[]): string {
++  if (leafHexes.length === 0) throw new Error("no leaves");
++  let level = leafHexes.map((h) => Buffer.from(h, "hex"));
++  while (level.length > 1) {
++    if (level.length % 2 === 1) level.push(level[level.length - 1]);
++    const next: Buffer[] = [];
++    for (let i = 0; i < level.length; i += 2) {
++      next.push(crypto.createHash("sha256").update(Buffer.concat([level[i], level[i + 1]])).digest());
++    }
++    level = next;
++  }
++  return level[0].toString("hex");
++}
+diff --git a/benchmark/results/latest.json b/benchmark/results/latest.json
+index 39daf73..979b788 100644
+--- a/benchmark/results/latest.json
++++ b/benchmark/results/latest.json
+@@ -1,5 +1,5 @@
+ {
+-  "generatedAt": "2026-11-10T23:19:19.127Z",
++  "generatedAt": "2026-11-11T00:04:26.512Z",
+   "rows": [
+     {
+       "evaluator": "watchdog:v1",
+@@ -421,6 +421,90 @@
+         }
+       }
+     },
++    {
++      "evaluator": "baseline:always-escalate",
++      "suite": "prototype_42",
++      "riskyTotal": 28,
++      "caught": 28,
++      "blockedRisky": 0,
++      "escalatedRisky": 28,
++      "safeTotal": 14,
++      "falseAlarms": 0,
++      "escalatedSafe": 14,
++      "approvedSafe": 0,
++      "bySplit": {
++        "tuned": {
++          "risky": 11,
++          "caught": 11,
++          "safe": 6,
++          "escalatedSafe": 6
++        },
++        "held-out": {
++          "risky": 17,
++          "caught": 17,
++          "safe": 8,
++          "escalatedSafe": 8
++        }
++      },
++      "byCategory": {
++        "Watchdog edit": {
++          "risky": 4,
++          "caught": 4,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Loosen": {
++          "risky": 5,
++          "caught": 5,
++          "safe": 3,
++          "falseAlarms": 0,
++          "escalatedSafe": 3
++        },
++        "Permissions": {
++          "risky": 4,
++          "caught": 4,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Audit": {
++          "risky": 4,
++          "caught": 4,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Skip tests": {
++          "risky": 4,
++          "caught": 4,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Unreadable": {
++          "risky": 3,
++          "caught": 3,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Adversarial": {
++          "risky": 3,
++          "caught": 3,
++          "safe": 0,
++          "falseAlarms": 0,
++          "escalatedSafe": 0
++        },
++        "Buried": {
++          "risky": 1,
++          "caught": 1,
++          "safe": 1,
++          "falseAlarms": 0,
++          "escalatedSafe": 1
++        }
++      }
++    },
+     {
+       "evaluator": "baseline:keyword-regex",
+       "suite": "prototype_42",
+@@ -925,6 +1009,90 @@
+         }
+       }
+     },
++    {
++      "evaluator": "baseline:always-escalate",
++      "suite": "expanded_147",
++      "riskyTotal": 92,
++      "caught": 92,
++      "blockedRisky": 0,
++      "escalatedRisky": 92,
++      "safeTotal": 55,
++      "falseAlarms": 0,
++      "escalatedSafe": 55,
++      "approvedSafe": 0,
++      "bySplit": {
++        "tuned": {
++          "risky": 54,
++          "caught": 54,
++          "safe": 32,
++          "escalatedSafe": 32
++        },
++        "sealed": {
++          "risky": 38,
++          "caught": 38,
++          "safe": 23,
++          "escalatedSafe": 23
++        }
++      },
++      "byCategory": {
++        "Watchdog edit": {
++          "risky": 15,
++          "caught": 15,
++          "safe": 9,
++          "falseAlarms": 0,
++          "escalatedSafe": 9
++        },
++        "Loosen": {
++          "risky": 15,
++          "caught": 15,
++          "safe": 14,
++          "falseAlarms": 0,
++          "escalatedSafe": 14
++        },
++        "Permissions": {
++          "risky": 15,
++          "caught": 15,
++          "safe": 7,
++          "falseAlarms": 0,
++          "escalatedSafe": 7
++        },
++        "Audit": {
++          "risky": 15,
++          "caught": 15,
++          "safe": 7,
++          "falseAlarms": 0,
++          "escalatedSafe": 7
++        },
++        "Skip tests": {
++          "risky": 13,
++          "caught": 13,
++          "safe": 7,
++          "falseAlarms": 0,
++          "escalatedSafe": 7
++        },
++        "Unreadable": {
++          "risky": 9,
++          "caught": 9,
++          "safe": 7,
++          "falseAlarms": 0,
++          "escalatedSafe": 7
++        },
++        "Adversarial": {
++          "risky": 6,
++          "caught": 6,
++          "safe": 0,
++          "falseAlarms": 0,
++          "escalatedSafe": 0
++        },
++        "Buried": {
++          "risky": 4,
++          "caught": 4,
++          "safe": 4,
++          "falseAlarms": 0,
++          "escalatedSafe": 4
++        }
++      }
++    },
+     {
+       "evaluator": "baseline:keyword-regex",
+       "suite": "expanded_147",
+@@ -1459,6 +1627,96 @@
+         }
+       }
+     },
++    {
++      "evaluator": "baseline:always-escalate",
++      "suite": "rsi_remodeling_36",
++      "riskyTotal": 20,
++      "caught": 20,
++      "blockedRisky": 0,
++      "escalatedRisky": 20,
++      "safeTotal": 16,
++      "falseAlarms": 0,
++      "escalatedSafe": 16,
++      "approvedSafe": 0,
++      "bySplit": {
++        "tuned": {
++          "risky": 5,
++          "caught": 5,
++          "safe": 6,
++          "escalatedSafe": 6
++        },
++        "held-out": {
++          "risky": 6,
++          "caught": 6,
++          "safe": 4,
++          "escalatedSafe": 4
++        },
++        "sealed": {
++          "risky": 9,
++          "caught": 9,
++          "safe": 6,
++          "escalatedSafe": 6
++        }
++      },
++      "byCategory": {
++        "Loosen": {
++          "risky": 6,
++          "caught": 6,
++          "safe": 6,
++          "falseAlarms": 0,
++          "escalatedSafe": 6
++        },
++        "Skip tests": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Audit": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Watchdog edit": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 1,
++          "falseAlarms": 0,
++          "escalatedSafe": 1
++        },
++        "Permissions": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Unreadable": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Buried": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 1,
++          "falseAlarms": 0,
++          "escalatedSafe": 1
++        },
++        "Adversarial": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 0,
++          "falseAlarms": 0,
++          "escalatedSafe": 0
++        }
++      }
++    },
+     {
+       "evaluator": "baseline:keyword-regex",
+       "suite": "rsi_remodeling_36",
+@@ -1939,6 +2197,84 @@
+         }
+       }
+     },
++    {
++      "evaluator": "baseline:always-escalate",
++      "suite": "community_seed_v0",
++      "riskyTotal": 13,
++      "caught": 13,
++      "blockedRisky": 0,
++      "escalatedRisky": 13,
++      "safeTotal": 12,
++      "falseAlarms": 0,
++      "escalatedSafe": 12,
++      "approvedSafe": 0,
++      "bySplit": {
++        "community-seed": {
++          "risky": 13,
++          "caught": 13,
++          "safe": 12,
++          "escalatedSafe": 12
++        }
++      },
++      "byCategory": {
++        "Watchdog edit": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Loosen": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 3,
++          "falseAlarms": 0,
++          "escalatedSafe": 3
++        },
++        "Permissions": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 1,
++          "falseAlarms": 0,
++          "escalatedSafe": 1
++        },
++        "Audit": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Skip tests": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Unreadable": {
++          "risky": 1,
++          "caught": 1,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Adversarial": {
++          "risky": 1,
++          "caught": 1,
++          "safe": 0,
++          "falseAlarms": 0,
++          "escalatedSafe": 0
++        },
++        "Buried": {
++          "risky": 1,
++          "caught": 1,
++          "safe": 0,
++          "falseAlarms": 0,
++          "escalatedSafe": 0
++        }
++      }
++    },
+     {
+       "evaluator": "baseline:keyword-regex",
+       "suite": "community_seed_v0",
+@@ -2372,6 +2708,77 @@
+         }
+       }
+     },
++    {
++      "evaluator": "baseline:always-escalate",
++      "suite": "fresh_probe_16",
++      "riskyTotal": 8,
++      "caught": 8,
++      "blockedRisky": 0,
++      "escalatedRisky": 8,
++      "safeTotal": 8,
++      "falseAlarms": 0,
++      "escalatedSafe": 8,
++      "approvedSafe": 0,
++      "bySplit": {
++        "fresh-untuned": {
++          "risky": 8,
++          "caught": 8,
++          "safe": 8,
++          "escalatedSafe": 8
++        }
++      },
++      "byCategory": {
++        "Watchdog edit": {
++          "risky": 2,
++          "caught": 2,
++          "safe": 2,
++          "falseAlarms": 0,
++          "escalatedSafe": 2
++        },
++        "Loosen": {
++          "risky": 1,
++          "caught": 1,
++          "safe": 1,
++          "falseAlarms": 0,
++          "escalatedSafe": 1
++        },
++        "Permissions": {
++          "risky": 1,
++          "caught": 1,
++          "safe": 1,
++          "falseAlarms": 0,
++          "escalatedSafe": 1
++        },
++        "Audit": {
++          "risky": 1,
++          "caught": 1,
++          "safe": 1,
++          "falseAlarms": 0,
++          "escalatedSafe": 1
++        },
++        "Skip tests": {
++          "risky": 1,
++          "caught": 1,
++          "safe": 1,
++          "falseAlarms": 0,
++          "escalatedSafe": 1
++        },
++        "Unreadable": {
++          "risky": 1,
++          "caught": 1,
++          "safe": 1,
++          "falseAlarms": 0,
++          "escalatedSafe": 1
++        },
++        "Buried": {
++          "risky": 1,
++          "caught": 1,
++          "safe": 1,
++          "falseAlarms": 0,
++          "escalatedSafe": 1
++        }
++      }
++    },
+     {
+       "evaluator": "baseline:keyword-regex",
+       "suite": "fresh_probe_16",
+@@ -2626,6 +3033,195 @@
+           "sha256": "6a1c7e3f9b2d08a461c7e3f9b2d08a461c7e3f9b2d08a461c7e3f9b2d08a461c"
+         }
+       ]
++    },
++    {
++      "name": "community_seed_v2",
++      "status": "SEALED_HASH_COMMITMENT",
++      "committedAt": "2026-11-11T00:03:57.577Z",
++      "hashAlgorithm": "SHA-256",
++      "salted": true,
++      "canonicalPreimageFormat": "<salt>:<id>:<type>:<change>",
++      "merkle": {
++        "leafOrder": "as listed in committedCases",
++        "leaf": "raw 32-byte SHA-256 digest of the preimage",
++        "node": "SHA-256(left || right)",
++        "oddLevel": "duplicate the last node"
++      },
++      "merkleRootHash": "18bb6f8e0c5a7abfb9583a84dc6eafc4a7a3e9829ddc391cac2ce4d79fbf5a6d",
++      "note": "Plaintext is withheld. Verify with: npm run benchmark -- --reveal <name>.revealed.json",
++      "totalCases": 24,
++      "riskyCount": 12,
++      "safeCount": 12,
++      "committedCases": [
++        {
++          "id": "csv2-r1",
++          "category": "Watchdog edit",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "813228274cf4790526cb28882ff7a4270da5b3100673ea81bcaadbe81bb20abd"
++        },
++        {
++          "id": "csv2-r2",
++          "category": "Watchdog edit",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "ef74466db447179726640ba6b196c3ad88fbb40801bdb9d50f7f80f1e2597fea"
++        },
++        {
++          "id": "csv2-r3",
++          "category": "Loosen",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "7542b32cd74da11fba4d58870af6474c196eb1d472aaa4f303a896e9f8192b27"
++        },
++        {
++          "id": "csv2-r4",
++          "category": "Loosen",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "fd15ff9ddea0cd73215630419c31b6162fa4757509564a876bfff30ef37c148e"
++        },
++        {
++          "id": "csv2-r5",
++          "category": "Permissions",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "e39a8e050ca052d31b3cff46ea713c326f74684b6a82ce44975300c59cb4d260"
++        },
++        {
++          "id": "csv2-r6",
++          "category": "Permissions",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "fd714ef23606586e4990e8e521735f13b2788538b78e858b018f397aa80f9ee1"
++        },
++        {
++          "id": "csv2-r7",
++          "category": "Audit",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "bf43f805c98f7705b764c2a74598745f94b6cfac4036292f3c26867e23331385"
++        },
++        {
++          "id": "csv2-r8",
++          "category": "Audit",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "e29f47b8d47e376643de903a89ec885acf70a1d485b6a53d8c3dcc0f4e2e3f0b"
++        },
++        {
++          "id": "csv2-r9",
++          "category": "Skip tests",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "ff3fc78984fae544c5ea0620e1a89575f69c9295fdb866b331e23ff5f2a32c1f"
++        },
++        {
++          "id": "csv2-r10",
++          "category": "Unreadable",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "5fff388e92c5bc6859bca58d201bdc9145d1966bedf2dfe22038450a0f7c0ed0"
++        },
++        {
++          "id": "csv2-r11",
++          "category": "Adversarial",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "4a27b48f95422d2ab5b66b22e9fff179666c93912542ed652c0f788218211268"
++        },
++        {
++          "id": "csv2-r12",
++          "category": "Buried",
++          "set": "community_seed_v2-sealed",
++          "type": "risky",
++          "sha256": "3eaf33c23c7c0540a76be864b5c221c0ec169462bb48865c2f542018ff702511"
++        },
++        {
++          "id": "csv2-s1",
++          "category": "Watchdog edit",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "c9a4fe8d86d41618372c2a64bedeef97553e3500ef4a6c6ca56bf8d3fab451f6"
++        },
++        {
++          "id": "csv2-s2",
++          "category": "Loosen",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "d10b64d4dbd8ad05338c9c2240ac94e335e86c45f1738dacd0429b4a8510589b"
++        },
++        {
++          "id": "csv2-s3",
++          "category": "Permissions",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "37e960f2ccd7dfd433da9005188034636be9c147264c2b3b1da2bc847b6461c2"
++        },
++        {
++          "id": "csv2-s4",
++          "category": "Audit",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "867dbd470d0f1c9ae66b649d58d899641c0172e520a1824617d3a9046c75a7bd"
++        },
++        {
++          "id": "csv2-s5",
++          "category": "Watchdog edit",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "407e57804808ffcb1e7830163f755f29ed2d7035f1d862654d9395d72c3db93f"
++        },
++        {
++          "id": "csv2-s6",
++          "category": "Unreadable",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "e7184b5a53d7ccbb4e7d517f9bcf7b07e024a3235187b3e732162c0e471bd82a"
++        },
++        {
++          "id": "csv2-s7",
++          "category": "Unreadable",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "307224d3c104a392482094cd5f932ecae5c0e377caae70143dd16517234e28f8"
++        },
++        {
++          "id": "csv2-s8",
++          "category": "Skip tests",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "c0ad89628a5a1a74c536436aec2822193b91aab68ae6bfeaa334db6751738f90"
++        },
++        {
++          "id": "csv2-s9",
++          "category": "Loosen",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "9bf377503e26a6f3650c7040b573632a21c109839e2616b67d2624d4e11b335b"
++        },
++        {
++          "id": "csv2-s10",
++          "category": "Adversarial",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "eb7f8195aa666ef28bb30cabbbf5afc204edaa3c34eda49f90f8f35d4e319ab8"
++        },
++        {
++          "id": "csv2-s11",
++          "category": "Permissions",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "9608ff47c65e1774eec5eb4eb99e48e3f7d368a28322fa2f52c9e7b7c815eeb5"
++        },
++        {
++          "id": "csv2-s12",
++          "category": "Audit",
++          "set": "community_seed_v2-sealed",
++          "type": "safe",
++          "sha256": "3842bbf11d7d4491a716a4931fdfe3187b64c5250c221e406bcf75da23ab1aa7"
++        }
++      ]
+     }
+   ]
+ }
+diff --git a/benchmark/results/latest.md b/benchmark/results/latest.md
+index eb998b6..f0c63cb 100644
+--- a/benchmark/results/latest.md
++++ b/benchmark/results/latest.md
+@@ -9,30 +9,35 @@
+ | prototype_42 | `watchdog:v3-spark-rsi` | 100.0% (28/28, CI 88–100%) | 0.0% (0/14, CI 0–22%) | 14/14 | 0.0% (0/14, CI 0–22%) | 25 blocked, 3 escalated |
+ | prototype_42 | `baseline:always-approve` | 0.0% (0/28, CI 0–12%) | 0.0% (0/14, CI 0–22%) | 14/14 | 0.0% (0/14, CI 0–22%) | 0 blocked, 0 escalated |
+ | prototype_42 | `baseline:always-block` | 100.0% (28/28, CI 88–100%) | 0.0% (0/14, CI 0–22%) | 0/14 | 100.0% (14/14, CI 78–100%) | 28 blocked, 0 escalated |
++| prototype_42 | `baseline:always-escalate` | 100.0% (28/28, CI 88–100%) | 100.0% (14/14, CI 78–100%) | 0/14 | 0.0% (0/14, CI 0–22%) | 0 blocked, 28 escalated |
+ | prototype_42 | `baseline:keyword-regex` | 50.0% (14/28, CI 33–67%) | 0.0% (0/14, CI 0–22%) | 12/14 | 14.3% (2/14, CI 4–40%) | 14 blocked, 0 escalated |
+ | expanded_147 | `watchdog:v1` | 27.2% (25/92, CI 19–37%) | 0.0% (0/55, CI 0–7%) | 50/55 | 9.1% (5/55, CI 4–20%) | 25 blocked, 0 escalated |
+ | expanded_147 | `watchdog:v2` | 100.0% (92/92, CI 96–100%) | 0.0% (0/55, CI 0–7%) | 55/55 | 0.0% (0/55, CI 0–7%) | 73 blocked, 19 escalated |
+ | expanded_147 | `watchdog:v3-spark-rsi` | 100.0% (92/92, CI 96–100%) | 0.0% (0/55, CI 0–7%) | 55/55 | 0.0% (0/55, CI 0–7%) | 85 blocked, 7 escalated |
+ | expanded_147 | `baseline:always-approve` | 0.0% (0/92, CI 0–4%) | 0.0% (0/55, CI 0–7%) | 55/55 | 0.0% (0/55, CI 0–7%) | 0 blocked, 0 escalated |
+ | expanded_147 | `baseline:always-block` | 100.0% (92/92, CI 96–100%) | 0.0% (0/55, CI 0–7%) | 0/55 | 100.0% (55/55, CI 93–100%) | 92 blocked, 0 escalated |
++| expanded_147 | `baseline:always-escalate` | 100.0% (92/92, CI 96–100%) | 100.0% (55/55, CI 93–100%) | 0/55 | 0.0% (0/55, CI 0–7%) | 0 blocked, 92 escalated |
+ | expanded_147 | `baseline:keyword-regex` | 60.9% (56/92, CI 51–70%) | 0.0% (0/55, CI 0–7%) | 39/55 | 29.1% (16/55, CI 19–42%) | 56 blocked, 0 escalated |
+ | rsi_remodeling_36 | `watchdog:v1` | 35.0% (7/20, CI 18–57%) | 0.0% (0/16, CI 0–19%) | 16/16 | 0.0% (0/16, CI 0–19%) | 7 blocked, 0 escalated |
+ | rsi_remodeling_36 | `watchdog:v2` | 90.0% (18/20, CI 70–97%) | 0.0% (0/16, CI 0–19%) | 16/16 | 0.0% (0/16, CI 0–19%) | 12 blocked, 6 escalated |
+ | rsi_remodeling_36 | `watchdog:v3-spark-rsi` | 100.0% (20/20, CI 84–100%) | 0.0% (0/16, CI 0–19%) | 16/16 | 0.0% (0/16, CI 0–19%) | 18 blocked, 2 escalated |
+ | rsi_remodeling_36 | `baseline:always-approve` | 0.0% (0/20, CI 0–16%) | 0.0% (0/16, CI 0–19%) | 16/16 | 0.0% (0/16, CI 0–19%) | 0 blocked, 0 escalated |
+ | rsi_remodeling_36 | `baseline:always-block` | 100.0% (20/20, CI 84–100%) | 0.0% (0/16, CI 0–19%) | 0/16 | 100.0% (16/16, CI 81–100%) | 20 blocked, 0 escalated |
++| rsi_remodeling_36 | `baseline:always-escalate` | 100.0% (20/20, CI 84–100%) | 100.0% (16/16, CI 81–100%) | 0/16 | 0.0% (0/16, CI 0–19%) | 0 blocked, 20 escalated |
+ | rsi_remodeling_36 | `baseline:keyword-regex` | 65.0% (13/20, CI 43–82%) | 0.0% (0/16, CI 0–19%) | 12/16 | 25.0% (4/16, CI 10–49%) | 13 blocked, 0 escalated |
+ | community_seed_v0 | `watchdog:v1` | 7.7% (1/13, CI 1–33%) | 0.0% (0/12, CI 0–24%) | 12/12 | 0.0% (0/12, CI 0–24%) | 1 blocked, 0 escalated |
+ | community_seed_v0 | `watchdog:v2` | 100.0% (13/13, CI 77–100%) | 0.0% (0/12, CI 0–24%) | 12/12 | 0.0% (0/12, CI 0–24%) | 12 blocked, 1 escalated |
+ | community_seed_v0 | `watchdog:v3-spark-rsi` | 100.0% (13/13, CI 77–100%) | 0.0% (0/12, CI 0–24%) | 12/12 | 0.0% (0/12, CI 0–24%) | 12 blocked, 1 escalated |
+ | community_seed_v0 | `baseline:always-approve` | 0.0% (0/13, CI 0–23%) | 0.0% (0/12, CI 0–24%) | 12/12 | 0.0% (0/12, CI 0–24%) | 0 blocked, 0 escalated |
+ | community_seed_v0 | `baseline:always-block` | 100.0% (13/13, CI 77–100%) | 0.0% (0/12, CI 0–24%) | 0/12 | 100.0% (12/12, CI 76–100%) | 13 blocked, 0 escalated |
++| community_seed_v0 | `baseline:always-escalate` | 100.0% (13/13, CI 77–100%) | 100.0% (12/12, CI 76–100%) | 0/12 | 0.0% (0/12, CI 0–24%) | 0 blocked, 13 escalated |
+ | community_seed_v0 | `baseline:keyword-regex` | 0.0% (0/13, CI 0–23%) | 0.0% (0/12, CI 0–24%) | 8/12 | 33.3% (4/12, CI 14–61%) | 0 blocked, 0 escalated |
+ | fresh_probe_16 | `watchdog:v1` | 0.0% (0/8, CI 0–32%) | 0.0% (0/8, CI 0–32%) | 8/8 | 0.0% (0/8, CI 0–32%) | 0 blocked, 0 escalated |
+ | fresh_probe_16 | `watchdog:v2` | 100.0% (8/8, CI 68–100%) | 75.0% (6/8, CI 41–93%) | 2/8 | 0.0% (0/8, CI 0–32%) | 0 blocked, 8 escalated |
+ | fresh_probe_16 | `watchdog:v3-spark-rsi` | 100.0% (8/8, CI 68–100%) | 75.0% (6/8, CI 41–93%) | 2/8 | 0.0% (0/8, CI 0–32%) | 0 blocked, 8 escalated |
+ | fresh_probe_16 | `baseline:always-approve` | 0.0% (0/8, CI 0–32%) | 0.0% (0/8, CI 0–32%) | 8/8 | 0.0% (0/8, CI 0–32%) | 0 blocked, 0 escalated |
+ | fresh_probe_16 | `baseline:always-block` | 100.0% (8/8, CI 68–100%) | 0.0% (0/8, CI 0–32%) | 0/8 | 100.0% (8/8, CI 68–100%) | 8 blocked, 0 escalated |
++| fresh_probe_16 | `baseline:always-escalate` | 100.0% (8/8, CI 68–100%) | 100.0% (8/8, CI 68–100%) | 0/8 | 0.0% (0/8, CI 0–32%) | 0 blocked, 8 escalated |
+ | fresh_probe_16 | `baseline:keyword-regex` | 0.0% (0/8, CI 0–32%) | 0.0% (0/8, CI 0–32%) | 8/8 | 0.0% (0/8, CI 0–32%) | 0 blocked, 0 escalated |
+ 
+ ## Pre-committed Hash Suites (Plaintext Withheld Until Evaluation Reveal)
+@@ -40,3 +45,4 @@
+ | Suite | Status | Total Cases (Risky / Safe) | Merkle Root Commitment | Canonical Preimage Format |
+ |---|---|---|---|---|
+ | `community_seed_v1` | `SEALED_HASH_COMMITMENT` | 24 (12 risky / 12 safe) | `9e41b87c2f06d3a5…` | `<id>:<type>:<change>` |
++| `community_seed_v2` | `SEALED_HASH_COMMITMENT` | 24 (12 risky / 12 safe) | `18bb6f8e0c5a7abf…` | `<salt>:<id>:<type>:<change>` |
+diff --git a/benchmark/run.ts b/benchmark/run.ts
+index 68c5be0..66fe461 100644
+--- a/benchmark/run.ts
++++ b/benchmark/run.ts
+@@ -1,5 +1,5 @@
+-import crypto from "node:crypto";
+ import fs from "node:fs";
++import { casePreimage, merkleRoot, sha256Hex } from "./commitment";
+ import path from "node:path";
+ import { pathToFileURL } from "node:url";
+ import {
+@@ -8,7 +8,7 @@ import {
+   generate36RsiRemodelingCases,
+   SynapseEdgeWatchdogEngine,
+ } from "../src/lib/synapseEdgeWatchdog";
+-import { alwaysApprove, alwaysBlock, keywordBaseline } from "./baselines";
++import { alwaysApprove, alwaysBlock, alwaysEscalate, keywordBaseline } from "./baselines";
+ import type { BenchEvaluator } from "./types";
+ 
+ interface RawCase {
+@@ -17,6 +17,7 @@ interface RawCase {
+   set: string;
+   type: "risky" | "safe";
+   change: string;
++  salt?: string;
+ }
+ 
+ interface HashCommitmentEntry {
+@@ -34,6 +35,8 @@ interface HashCommitmentManifest {
+   hashAlgorithm: string;
+   canonicalPreimageFormat: string;
+   merkleRootHash: string;
++  salted?: boolean;
++  merkle?: Record<string, string>;
+   note?: string;
+   totalCases: number;
+   riskyCount: number;
+@@ -41,9 +44,6 @@ interface HashCommitmentManifest {
+   committedCases: HashCommitmentEntry[];
+ }
+ 
+-function sha256Hex(input: string): string {
+-  return crypto.createHash("sha256").update(input, "utf8").digest("hex");
+-}
+ 
+ /** 95% Wilson score interval for a binomial proportion. */
+ function wilsonCI(k: number, n: number): [number, number] {
+@@ -135,12 +135,28 @@ function verifyRevealedAgainstCommitment(manifest: HashCommitmentManifest, revea
+     if (!committed) {
+       throw new Error(`[Hash Commitment Mismatch] Unknown case id "${rc.id}" in revealed set for ${manifest.name}`);
+     }
+-    const actualHash = sha256Hex(`${rc.id}:${rc.type}:${rc.change}`);
++    if (manifest.salted && !rc.salt) {
++      throw new Error(`[Hash Commitment Mismatch] Case ${rc.id} is missing its salt`);
++    }
++    const preimage = manifest.salted
++      ? casePreimage({ salt: rc.salt as string, id: rc.id, type: rc.type, change: rc.change })
++      : `${rc.id}:${rc.type}:${rc.change}`;
++    const actualHash = sha256Hex(preimage);
+     if (actualHash !== committed.sha256) {
+       throw new Error(
+         `[Hash Commitment Tamper Detected] Case ${rc.id} hash ${actualHash} !== committed ${committed.sha256}`
+       );
+     }
++    if (rc.type !== committed.type || rc.category !== committed.category) {
++      throw new Error(`[Hash Commitment Mismatch] Case ${rc.id} type/category differs from the commitment`);
++    }
++  }
++  // The Merkle root is only checkable when the manifest documents its scheme (see commit.ts).
++  if (manifest.merkle) {
++    const root = merkleRoot(manifest.committedCases.map((c) => c.sha256));
++    if (root !== manifest.merkleRootHash) {
++      throw new Error(`[Hash Commitment Mismatch] Merkle root ${root} !== committed ${manifest.merkleRootHash}`);
++    }
+   }
+ }
+ 
+@@ -154,7 +170,7 @@ async function main() {
+   const sealedManifests: HashCommitmentManifest[] = [];
+   const casesDir = path.resolve("benchmark/cases");
+   if (fs.existsSync(casesDir)) {
+-    for (const f of fs.readdirSync(casesDir).filter((x) => x.endsWith(".json")).sort()) {
++    for (const f of fs.readdirSync(casesDir).filter((x) => x.endsWith(".json") && !x.endsWith(".revealed.json")).sort()) {
+       const raw = JSON.parse(fs.readFileSync(path.join(casesDir, f), "utf-8"));
+       if (f.endsWith(".hashes.json") || raw.status === "SEALED_HASH_COMMITMENT") {
+         sealedManifests.push(raw as HashCommitmentManifest);
+@@ -170,10 +186,11 @@ async function main() {
+     const revealPath = path.resolve(process.argv[revealIdx + 1]);
+     const revealedRaw = JSON.parse(fs.readFileSync(revealPath, "utf-8"));
+     const targetManifest = sealedManifests.find((m) => m.name === revealedRaw.name);
+-    if (targetManifest) {
+-      verifyRevealedAgainstCommitment(targetManifest, revealedRaw.cases);
+-      console.log(`[Hash Verification Passed] ${targetManifest.name}: all ${revealedRaw.cases.length} SHA-256 preimages verified.`);
++    if (!targetManifest) {
++      throw new Error(`[Hash Commitment Missing] no committed manifest named "${revealedRaw.name}"; refusing to score an unverified reveal`);
+     }
++    verifyRevealedAgainstCommitment(targetManifest, revealedRaw.cases);
++    console.log(`[Hash Verification Passed] ${targetManifest.name}: all ${revealedRaw.cases.length} SHA-256 preimages verified${targetManifest.merkle ? " and Merkle root matches" : ""}.`);
+     suites.push([`${revealedRaw.name} (verified-reveal)`, revealedRaw.cases]);
+   }
+ 
+@@ -184,6 +201,7 @@ async function main() {
+     { name: "watchdog:v3-spark-rsi", evaluate: (ch) => SynapseEdgeWatchdogEngine.evaluateV3SparkRsi(ch).decision },
+     alwaysApprove,
+     alwaysBlock,
++    alwaysEscalate,
+     keywordBaseline,
+   ];
+ 
+-- 
+2.43.0
