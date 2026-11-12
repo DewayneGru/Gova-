@@ -273,7 +273,7 @@ def test_rapid_20_turn_supercritical_anti_windup(tmp_path: Path):
     """Verifies that conditional anti-windup and feedforward derivative damping (delta_H)
     prevent post-spike seizure overshoot and hold mean |r - 0.48| < 0.12 under 20-turn switching."""
     import random
-    from synapse_edge_governor import R_TARGET, SynapseEdgeMiddleware
+    from synapse_governor import R_TARGET, SynapseEdgeMiddleware
 
     mw = SynapseEdgeMiddleware(
         state_path=tmp_path / "rapid_state.json",

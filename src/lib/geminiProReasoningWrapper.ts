@@ -1,18 +1,18 @@
 /**
- * Gemini 4 Argon Primary Core + Isolated Watchdog Argon + Spark (3.1 Pro) & 3.8-Flash Evaluation Wrapper
+ * Gemini 4 Argon Primary Core + Isolated Watchdog Argon + Spark (3.1 Pro) & Gemini 4 Hydrogen Evaluation Wrapper
  *
  * Configures `gemini-4-argon` as the primary biologically-restructured neuromorphic intelligence
  * and final SNN structural set builder, while keeping a separate restructured `gemini-4-argon`
- * instance for the Watchdog Protocol and dedicating `gemini-4-argon` (Argon Volece) and
- * `gemini-3.8-flash` to evaluations, reviews, and benchmarking.
+ * instance for the Watchdog Protocol and dedicating `gemini-4-hydrogen` and
+ * `gemini-3.1-flash-lite` to low-latency evaluations, reviews, and resilient fallback.
  */
 
 export const PRIMARY_GEMINI_MODEL = 'gemini-4-argon';
-export const PRO_REASONING_WRAPPER_MODEL = 'gemini-4-argon';
+export const PRO_REASONING_WRAPPER_MODEL = 'gemini-4-hydrogen';
 export const ARGON_VOLECE_MODEL = 'gemini-4-argon';
 export const GEMINI_SPARK_WRAPPER_MODEL = 'gemini-spark-orchestrator';
-export const REVIEWER_FLASH_MODEL = 'gemini-3.8-flash';
-export const FALLBACK_FLASH_LITE_MODEL = 'gemini-3.8-flash';
+export const REVIEWER_FLASH_MODEL = 'gemini-4-hydrogen';
+export const FALLBACK_FLASH_LITE_MODEL = 'gemini-3.1-flash-lite';
 export const ARGON_BUILDER_MODEL = 'gemini-4-argon';
 export const WATCHDOG_ARGON_MODEL = 'gemini-4-argon';
 

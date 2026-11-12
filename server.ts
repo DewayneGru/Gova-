@@ -201,8 +201,19 @@ function isModelQuotaCooled(modelName: string): boolean {
   return false;
 }
 
-function markModelQuotaCooled(modelName: string, cooldownMs = 5000): void {
+function markModelQuotaCooled(modelName: string, cooldownMs = 30000): void {
   modelQuotaCooldowns[modelName] = Date.now() + cooldownMs;
+}
+
+function getOrderedModelCandidates(modelTier = "general"): string[] {
+  const baseOrder =
+    modelTier === "fast"
+      ? [PRO_REASONING_WRAPPER_MODEL, FALLBACK_FLASH_LITE_MODEL, PRIMARY_GEMINI_MODEL]
+      : [PRIMARY_GEMINI_MODEL, PRO_REASONING_WRAPPER_MODEL, FALLBACK_FLASH_LITE_MODEL];
+  const unique = Array.from(new Set(baseOrder));
+  const active = unique.filter((m) => !isModelQuotaCooled(m));
+  const cooled = unique.filter((m) => isModelQuotaCooled(m));
+  return [...active, ...cooled];
 }
 
 function isTransientModelError(err: any): boolean {
@@ -210,10 +221,16 @@ function isTransientModelError(err: any): boolean {
   const status = err?.status || err?.statusCode;
   const errStr = typeof err === "string" ? err : String(err?.message || err);
   return (
+    status === 403 ||
+    status === 404 ||
     status === 429 ||
     status === 503 ||
+    errStr.includes("403") ||
+    errStr.includes("404") ||
     errStr.includes("429") ||
     errStr.includes("503") ||
+    errStr.includes("NOT_FOUND") ||
+    errStr.includes("PERMISSION_DENIED") ||
     errStr.includes("UNAVAILABLE") ||
     errStr.includes("High demand") ||
     errStr.includes("RESOURCE_EXHAUSTED") ||
@@ -330,6 +347,7 @@ function buildTelemetrySnapshotFromEdge(edgeTelemetry?: any): TelemetrySnapshotS
 
 function generateNeurocomputationalFallback(role: string, userQuery: string, edgeTelemetry?: any): string {
   const snapshot = buildTelemetrySnapshotFromEdge(edgeTelemetry);
+  const cleanQuery = (userQuery || "neuromorphic architecture").trim().replace(/\s+/g, " ").slice(0, 140);
 
   if (role === "gova_broadcaster") {
     return generatePersonaResponse("gova_broadcaster", userQuery, snapshot);
@@ -339,10 +357,10 @@ function generateNeurocomputationalFallback(role: string, userQuery: string, edg
   }
   if (role === "plasticity_researcher") {
     const stdpDelta = edgeTelemetry?.weightDeltaSum ?? 0.02;
-    return `Maintaining homeostatic equilibrium between Long-Term Potentiation (LTP) and Long-Term Depression (LTD) at an A-/A+ ratio of ${snapshot.ltdLtpRatio} (cumulative STDP delta: ${stdpDelta}) prevents runaway weight drift beyond ${snapshot.meanSynapticWeight}w while preserving critical associative memory traces across ${snapshot.corticalActiveFraction * 100}% active cortical assemblies.`;
+    return `Evaluating "${cleanQuery}" under homeostatic STDP equilibrium requires maintaining an LTD/LTP A-/A+ ratio of ${snapshot.ltdLtpRatio} (cumulative STDP delta: ${stdpDelta}), preventing runaway weight drift beyond ${snapshot.meanSynapticWeight}w while preserving associative traces across ${(snapshot.corticalActiveFraction * 100).toFixed(1)}% active cortical assemblies (σ = ${snapshot.branchingRatio}).`;
   }
   // Default neuromorphic_architect
-  return `In sub-threshold CMOS and event-driven neuromorphic silicon, asynchronous 64-byte burst DMA ring buffers decouple computation from clock distribution. Operating at ${snapshot.powerMw}mW and ${snapshot.aerLatencyMs}ms AER latency (${snapshot.aerJitterMs}ms jitter), localized crossbar arrays with Q1.7 INT8 weight clamping (${snapshot.meanSynapticWeight}w) ensure dynamic power scales strictly with sparse spike entropy.`;
+  return `Analyzing "${cleanQuery}" on event-driven neuromorphic silicon requires asynchronous 64-byte burst DMA ring buffers decoupled from global clock distribution. Operating at ${snapshot.powerMw}mW and ${snapshot.aerLatencyMs}ms AER latency (${snapshot.aerJitterMs}ms jitter), localized crossbar arrays with Q1.7 INT8 weight clamping (${snapshot.meanSynapticWeight}w) and branching ratio σ = ${snapshot.branchingRatio} bound dynamic power strictly to sparse spike entropy.`;
 }
 
 // 1. Health check & Model Architecture Wrapper inspection
@@ -427,12 +445,8 @@ app.post("/api/chat", aiRouteRateLimiter, async (req, res) => {
 
     const ai = getGenAIClient();
 
-    // Map tier with Gemini 3.8 Flash primary execution wrapped with 3.1 Pro Reasoning & Coding Skills
-    const preferredModels: string[] = [
-      PRIMARY_GEMINI_MODEL,
-      PRO_REASONING_WRAPPER_MODEL,
-      FALLBACK_FLASH_LITE_MODEL,
-    ];
+    // Map tier across deduplicated, quota-aware Gemini 4 Argon / Hydrogen / 3.1 Flash Lite candidates
+    const preferredModels: string[] = getOrderedModelCandidates(modelTier);
     const targetThinkingLevel =
       modelTier === "fast"
         ? ThinkingLevel.LOW
@@ -494,6 +508,7 @@ app.post("/api/chat", aiRouteRateLimiter, async (req, res) => {
         }
       } catch (err: any) {
         lastErr = err;
+        if (isTransientModelError(err)) markModelQuotaCooled(candModel, 45000);
         console.warn(
           `[Chat] Candidate ${candModel} notice: ${cleanErrorMessage(err)}. Trying resilient candidate...`
         );
@@ -603,11 +618,7 @@ app.post("/api/chat/stream", aiRouteRateLimiter, async (req, res) => {
     }
 
     const ai = getGenAIClient();
-    const preferredModels: string[] = [
-      PRIMARY_GEMINI_MODEL,
-      PRO_REASONING_WRAPPER_MODEL,
-      FALLBACK_FLASH_LITE_MODEL,
-    ];
+    const preferredModels: string[] = getOrderedModelCandidates(modelTier);
     const targetThinkingLevel =
       modelTier === "fast"
         ? ThinkingLevel.LOW
@@ -766,6 +777,7 @@ app.post("/api/chat/stream", aiRouteRateLimiter, async (req, res) => {
           break;
         }
       } catch (err: any) {
+        if (isTransientModelError(err)) markModelQuotaCooled(candModel, 45000);
         console.warn(
           `[ChatStream] Candidate ${candModel} notice: ${cleanErrorMessage(err)}. Trying next...`
         );
@@ -925,7 +937,9 @@ const BANNED_AFFIRMATION_REGEX =
   /^\s*(?:certainly|absolutely|definitely|of course|sure(?:\s+thing)?|great(?:\s+question)?|good(?:\s+question)?|excellent(?:\s+question)?|i\s+understand(?:\s+what\s+you\s+mean)?|understood|got\s+it|i\s+hear\s+you|that\s+makes\s+sense|you(?:'re|\s+are)\s+right|happy\s+to\s+help|glad\s+to\s+help|here\s+is\s+(?:the|a)\s+(?:breakdown|summary|analysis)|let(?:'s|\s+us)\s+(?:dive\s+in|explore|break\s+this\s+down|look\s+at))[!.,:\s—–-]*/i;
 
 function sanitizeModelAutoOutput(rawText: string): string {
-  let cleaned = String(rawText || "").trim();
+  let cleaned = String(rawText || "")
+    .replace(/<thought>[\s\S]*?<\/thought>/gi, "")
+    .trim();
   for (let i = 0; i < 6; i++) {
     const next = cleaned.replace(BANNED_AFFIRMATION_REGEX, "").trim();
     if (next === cleaned) break;
@@ -1006,7 +1020,7 @@ app.post("/api/gova/turn", aiRouteRateLimiter, async (req, res) => {
     }
 
     const ai = getGenAIClient();
-    const preferredModels = [PRIMARY_GEMINI_MODEL, PRO_REASONING_WRAPPER_MODEL, FALLBACK_FLASH_LITE_MODEL];
+    const preferredModels = getOrderedModelCandidates(modelTier);
 
     const govaSnapshot = buildTelemetrySnapshotFromEdge(req.body?.edgeTelemetry);
     const govaSystemPrompt = wrapSystemInstructionWith31ProSkills(
@@ -1042,6 +1056,7 @@ app.post("/api/gova/turn", aiRouteRateLimiter, async (req, res) => {
           break;
         }
       } catch (err: any) {
+        if (isTransientModelError(err)) markModelQuotaCooled(candModel, 45000);
         console.warn(`[Gova] Model candidate ${candModel} notice: ${cleanErrorMessage(err)}. Trying resilient fallback...`);
       }
     }
@@ -1332,8 +1347,8 @@ Provide a JSON block with recommended structural parameters to update the neurom
 }
 \`\`\``;
 
-    // Attempt Gemini 3.8 Flash wrapped with 3.1 Pro Reasoning Skills + Google Search grounding
-    const candidateModels = [PRIMARY_GEMINI_MODEL, PRO_REASONING_WRAPPER_MODEL, FALLBACK_FLASH_LITE_MODEL];
+    // Attempt deduplicated Gemini 4 Argon / Hydrogen / 3.1 Flash Lite with Google Search grounding
+    const candidateModels = getOrderedModelCandidates("general");
     let result: any = null;
     let usedModel = candidateModels[0];
     const researchSystemInstruction = wrapSystemInstructionWith31ProSkills(
@@ -1565,729 +1580,6 @@ app.post("/api/adapters/tool-exec", (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: "Tool execution failed", details: String(err?.message || err) });
   }
-});
-
-// ============================================================================
-// 2n. NovaVault Media Studio Control Plane & 3D YouTube Shorts 24/7 Engine
-// ============================================================================
-
-interface NovaVaultStore {
-  organization: string;
-  goal: string;
-  governance: {
-    require_human_approval_for_hires: boolean;
-    auto_stop_on_budget_limit: boolean;
-    current_spend_usd: number;
-    max_budget_usd: number;
-    totalTicketsCreated: number;
-    totalShortsPublished: number;
-  };
-  agents: Record<string, {
-    name: string;
-    role: string;
-    reports_to: string;
-    runtime: "HTTP" | "Bash";
-    endpoint?: string;
-    command?: string;
-    monthly_budget_usd: number;
-    job_description: string;
-    status: "IDLE" | "ACTIVE" | "PROCESSING" | "ERROR";
-    lastHeartbeat: number;
-    ticketsProcessed: number;
-    polyvagal: "ventral" | "sympathetic" | "dorsal_low" | "neutral";
-  }>;
-  dialogueLogs: Array<{
-    id: string;
-    timestamp: number;
-    tick: number;
-    sender: string;
-    receiver: string;
-    stepType: "TICKET_DISPATCH" | "SCOUT_RETURN" | "SCENE_GEN" | "METADATA_OPTIMIZE" | "HEARTBEAT" | "HIRE_PROPOSAL";
-    message: string;
-    polyvagalState: string;
-    valenceDelta: number;
-    metadata?: Record<string, any>;
-  }>;
-  tickets: Array<{
-    id: string;
-    title: string;
-    concept: string;
-    targetAudience: string;
-    viralHook: string;
-    status: "SCOUTED" | "PRODUCING" | "RENDERED" | "QUEUED";
-    assignedTo: string;
-    createdAt: number;
-    oppositesPair: [string, string];
-  }>;
-  candidateHires: Array<{
-    id: string;
-    name: string;
-    role: string;
-    reports_to: string;
-    runtime: "HTTP" | "Bash";
-    commandOrEndpoint: string;
-    monthly_budget_usd: number;
-    job_description: string;
-    reason: string;
-    status: "PENDING_APPROVAL" | "APPROVED" | "REJECTED";
-    proposedAt: number;
-  }>;
-  tickCounter: number;
-}
-
-const novaVaultState: NovaVaultStore = {
-  organization: "NovaVault Media Studio",
-  goal: "Create, optimize, and publish interactive 30-second 3D animated YouTube Shorts 24/7 using zero-cost APIs.",
-  governance: {
-    require_human_approval_for_hires: true,
-    auto_stop_on_budget_limit: true,
-    current_spend_usd: 0.00,
-    max_budget_usd: 0.00,
-    totalTicketsCreated: 24,
-    totalShortsPublished: 12,
-  },
-  agents: {
-    Synapse_CEO: {
-      name: "Synapse_CEO",
-      role: "CEO",
-      reports_to: "Board (Human)",
-      runtime: "HTTP",
-      endpoint: "http://localhost:8080/heartbeat",
-      monthly_budget_usd: 0.00,
-      job_description: "Coordinate topic tickets through SparkNovaOrchestrator and log every SPARK_DIALOGUE_STEP.",
-      status: "ACTIVE",
-      lastHeartbeat: Date.now(),
-      ticketsProcessed: 24,
-      polyvagal: "ventral",
-    },
-    Reach_Scout: {
-      name: "Reach_Scout",
-      role: "Marketer",
-      reports_to: "Synapse_CEO",
-      runtime: "Bash",
-      command: "agent-reach search --platforms youtube,reddit --query 'kids animation opposites shorts'",
-      monthly_budget_usd: 0.00,
-      job_description: "Scan YouTube and Reddit for high-retention educational concepts using zero paid APIs.",
-      status: "ACTIVE",
-      lastHeartbeat: Date.now(),
-      ticketsProcessed: 24,
-      polyvagal: "ventral",
-    },
-    AgentTube_Producer: {
-      name: "AgentTube_Producer",
-      role: "Engineer",
-      reports_to: "Synapse_CEO",
-      runtime: "HTTP",
-      endpoint: "http://localhost:3456/api/heartbeat",
-      monthly_budget_usd: 0.00,
-      job_description: "Run darkzOGx/youtube-automation-agent to generate 3D character shorts, optimize metadata, and queue uploads.",
-      status: "ACTIVE",
-      lastHeartbeat: Date.now(),
-      ticketsProcessed: 20,
-      polyvagal: "ventral",
-    },
-  },
-  tickCounter: 142,
-  dialogueLogs: [
-    {
-      id: "spark_init_1",
-      timestamp: Date.now() - 45000,
-      tick: 139,
-      sender: "Synapse_CEO",
-      receiver: "Board (Human)",
-      stepType: "HEARTBEAT",
-      message: "NovaVault Media Studio initialized with $0.00 budget ceiling and zero-cost API pipeline.",
-      polyvagalState: "ventral",
-      valenceDelta: 0.08,
-      metadata: { budgetUsd: 0.00, runtime: "SparkNovaOrchestrator" },
-    },
-    {
-      id: "spark_init_2",
-      timestamp: Date.now() - 30000,
-      tick: 140,
-      sender: "Synapse_CEO",
-      receiver: "Reach_Scout",
-      stepType: "TICKET_DISPATCH",
-      message: "Assigned Topic Ticket #NV-098: 'Kids Educational Opposites - Heavy vs Light' via Bash agent-reach runtime.",
-      polyvagalState: "ventral",
-      valenceDelta: 0.05,
-      metadata: { ticketId: "NV-098" },
-    },
-    {
-      id: "spark_init_3",
-      timestamp: Date.now() - 18000,
-      tick: 141,
-      sender: "Reach_Scout",
-      receiver: "AgentTube_Producer",
-      stepType: "SCOUT_RETURN",
-      message: "Scraped YouTube & Reddit signals: 'Giant Blue Elephant vs Feather-Weight Finch' +420% viral velocity.",
-      polyvagalState: "ventral",
-      valenceDelta: 0.09,
-      metadata: { audienceRetentionEst: "92.4%", source: "Reddit r/Parenting + YouTube Shorts Trends" },
-    },
-    {
-      id: "spark_init_4",
-      timestamp: Date.now() - 5000,
-      tick: 142,
-      sender: "AgentTube_Producer",
-      receiver: "Synapse_CEO",
-      stepType: "SCENE_GEN",
-      message: "Rendered 30s WebGL 3D character animation (Opposites: Huge vs Tiny) with kinetic bouncy captions & audio cues.",
-      polyvagalState: "ventral",
-      valenceDelta: 0.07,
-      metadata: { durationSec: 30, resolution: "1080x1920 (9:16)", zeroCostApi: true },
-    },
-  ],
-  tickets: [
-    {
-      id: "NV-101",
-      title: "Gigantic Mammoth vs Micro Spark Bug",
-      concept: "Opposites: Tremendous Heavy vs Microscopic Tiny in a bouncy interactive 3D physics stadium.",
-      targetAudience: "Ages 3-8 & Parents (YouTube Shorts Educational)",
-      viralHook: "Can the tiniest bug launch the heaviest mammoth into the clouds?! Watch till the 26s flip!",
-      status: "RENDERED",
-      assignedTo: "AgentTube_Producer",
-      createdAt: Date.now() - 3600000,
-      oppositesPair: ["Giant", "Tiny"],
-    },
-    {
-      id: "NV-102",
-      title: "Fire Dragon vs Ice Penguin: Hot & Cold!",
-      concept: "Opposites: Scorching Lava Breath meets Freezing Ice Slides with hilarious sound effects.",
-      targetAudience: "Kids 4-10 (High sensory 3D animation shorts)",
-      viralHook: "What happens when Ice Cream meets Lava? 3, 2, 1... Sizzle freeze!",
-      status: "QUEUED",
-      assignedTo: "AgentTube_Producer",
-      createdAt: Date.now() - 1800000,
-      oppositesPair: ["Hot", "Cold"],
-    },
-    {
-      id: "NV-103",
-      title: "Supersonic Cheetah vs Sleepy Snapping Snail",
-      concept: "Opposites: Mach-1 Speed versus 0.01 mph crawl with time-warp slow-mo camera zooms.",
-      targetAudience: "Kids & Family Shorts",
-      viralHook: "The fastest animal challenged the slowest... and lost?! Here is why!",
-      status: "SCOUTED",
-      assignedTo: "Reach_Scout",
-      createdAt: Date.now() - 900000,
-      oppositesPair: ["Fast", "Slow"],
-    },
-  ],
-  candidateHires: [
-    {
-      id: "hire_cand_1",
-      name: "SoundFX_SynthAgent",
-      role: "SoundDesigner",
-      reports_to: "AgentTube_Producer",
-      runtime: "Bash",
-      commandOrEndpoint: "npx sound-effects-agent --zero-cost",
-      monthly_budget_usd: 0.00,
-      job_description: "Synthesize cartoon boings, stomps, and fanfare cues for 3D character movements using Web Audio zero-cost oscillators.",
-      reason: "Enhance audio sensory retention for kids educational shorts by 18%.",
-      status: "PENDING_APPROVAL",
-      proposedAt: Date.now() - 600000,
-    },
-  ],
-};
-
-// GET /api/novavault/status
-app.get("/api/novavault/status", (_req, res) => {
-  res.json({
-    organization: novaVaultState.organization,
-    goal: novaVaultState.goal,
-    governance: novaVaultState.governance,
-    agents: Object.values(novaVaultState.agents),
-    dialogueLogs: novaVaultState.dialogueLogs.slice(-30),
-    tickets: novaVaultState.tickets,
-    candidateHires: novaVaultState.candidateHires,
-    tickCounter: novaVaultState.tickCounter,
-  });
-});
-
-// POST /api/novavault/heartbeat - Execute agent heartbeat & SPARK_DIALOGUE_STEP log
-app.post("/api/novavault/heartbeat", async (req, res) => {
-  try {
-    const { triggeredBy = "Board (Human)" } = req.body;
-    novaVaultState.tickCounter += 1;
-    const currentTick = novaVaultState.tickCounter;
-    const now = Date.now();
-
-    // Check budget limit governance rule
-    if (novaVaultState.governance.auto_stop_on_budget_limit && novaVaultState.governance.current_spend_usd > novaVaultState.governance.max_budget_usd) {
-      return res.status(403).json({
-        error: "PIPELINE_STOPPED_ON_BUDGET_LIMIT",
-        message: "Governance Auto-Stop Engaged: Spend exceeds $0.00 monthly budget ceiling.",
-      });
-    }
-
-    // Update agent heartbeats
-    Object.values(novaVaultState.agents).forEach(a => {
-      a.lastHeartbeat = now;
-      a.status = "ACTIVE";
-    });
-
-    const dialogueMessages = [
-      `[Heartbeat Sync] Synapse_CEO verified all 3 agents running on zero-cost runtimes (HTTP :8080, Bash, HTTP :3456).`,
-      `[Heartbeat Sync] Reach_Scout polled YouTube Trends & Reddit /r/Parenting. Zero paid API quotas used.`,
-      `[Heartbeat Sync] AgentTube_Producer heartbeat validated darkzOGx/youtube-automation-agent queue ready for 30s 3D render.`,
-    ];
-
-    const newLogs = dialogueMessages.map((msg, idx) => ({
-      id: `spark_hb_${currentTick}_${idx}`,
-      timestamp: now + idx * 200,
-      tick: currentTick,
-      sender: idx === 0 ? "Synapse_CEO" : idx === 1 ? "Reach_Scout" : "AgentTube_Producer",
-      receiver: "SparkNovaOrchestrator",
-      stepType: "HEARTBEAT" as const,
-      message: msg,
-      polyvagalState: "ventral",
-      valenceDelta: 0.04,
-      metadata: { triggeredBy, zeroCostUsd: 0.00 },
-    }));
-
-    novaVaultState.dialogueLogs.push(...newLogs);
-
-    res.json({
-      success: true,
-      currentTick,
-      timestamp: now,
-      agents: Object.values(novaVaultState.agents),
-      newLogs,
-      governance: novaVaultState.governance,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: "Heartbeat failed", details: String(err?.message || err) });
-  }
-});
-
-// POST /api/novavault/dispatch-ticket - Coordinate topic tickets through SparkNovaOrchestrator
-app.post("/api/novavault/dispatch-ticket", async (req, res) => {
-  try {
-    const { topic = "Kids Animation Opposites", oppositesPair = ["Heavy", "Light"] } = req.body;
-    novaVaultState.tickCounter += 1;
-    const currentTick = novaVaultState.tickCounter;
-    const now = Date.now();
-
-    const ticketId = `NV-${100 + novaVaultState.tickets.length + 1}`;
-
-    let concept = `Opposites: ${oppositesPair[0]} vs ${oppositesPair[1]} in a vibrant 3D playground`;
-    let viralHook = `Wait! Can ${oppositesPair[1]} really beat ${oppositesPair[0]}?!`;
-
-    // Attempt Gemini synthesis for high-retention concept
-    try {
-      const ai = getGenAIClient();
-      const prompt = `You are Synapse_CEO in NovaVault Media Studio.
-Generate an engaging 30-second 3D animated YouTube Shorts concept for young kids teaching the opposites pair: "${oppositesPair[0]} vs ${oppositesPair[1]}".
-Focus on high retention, educational delight, and zero-cost 3D character animation.
-Output valid JSON with keys:
-"title" (string),
-"concept" (string),
-"viralHook" (string),
-"targetAudience" (string)`;
-
-      const geminiRes = await ai.models.generateContent({
-        model: PRIMARY_GEMINI_MODEL,
-        contents: prompt,
-        config: {
-          systemInstruction: wrapSystemInstructionWith31ProSkills("You are Synapse_CEO in NovaVault Media Studio.", "chat"),
-          responseMimeType: "application/json",
-        },
-      });
-
-      const parsed = JSON.parse(geminiRes.text || "{}");
-      if (parsed.title) {
-        concept = parsed.concept || concept;
-        viralHook = parsed.viralHook || viralHook;
-      }
-    } catch (_e) {
-      // Fallback zero-cost procedural template
-    }
-
-    const newTicket = {
-      id: ticketId,
-      title: `${oppositesPair[0]} vs ${oppositesPair[1]}! 3D Kids Opposites`,
-      concept,
-      targetAudience: "Kids 2-7 & Parents",
-      viralHook,
-      status: "PRODUCING" as const,
-      assignedTo: "AgentTube_Producer",
-      createdAt: now,
-      oppositesPair: [oppositesPair[0], oppositesPair[1]] as [string, string],
-    };
-
-    novaVaultState.tickets.unshift(newTicket);
-    novaVaultState.governance.totalTicketsCreated += 1;
-    novaVaultState.agents.Synapse_CEO.ticketsProcessed += 1;
-
-    // Log SPARK_DIALOGUE_STEP
-    const stepLog = {
-      id: `spark_step_${currentTick}`,
-      timestamp: now,
-      tick: currentTick,
-      sender: "Synapse_CEO",
-      receiver: "AgentTube_Producer",
-      stepType: "TICKET_DISPATCH" as const,
-      message: `[SPARK_DIALOGUE_STEP] Synapse_CEO dispatched Ticket ${ticketId}: "${newTicket.title}" with hook: "${viralHook}".`,
-      polyvagalState: "ventral",
-      valenceDelta: 0.08,
-      metadata: { ticketId, oppositesPair },
-    };
-    novaVaultState.dialogueLogs.push(stepLog);
-
-    res.json({
-      success: true,
-      ticket: newTicket,
-      stepLog,
-      governance: novaVaultState.governance,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: "Failed to dispatch ticket", details: String(err?.message || err) });
-  }
-});
-
-// POST /api/novavault/generate-short - Generate complete 30s 3D animation script, kinetic captions, & YouTube metadata
-app.post("/api/novavault/generate-short", async (req, res) => {
-  try {
-    const {
-      ticketId,
-      oppositesPair = ["Big", "Tiny"],
-      environmentTheme = "cartoon_meadow"
-    } = req.body;
-
-    novaVaultState.tickCounter += 1;
-    const currentTick = novaVaultState.tickCounter;
-    const now = Date.now();
-
-    let scriptResult = {
-      id: `short_proj_${now}`,
-      title: `${oppositesPair[0]} vs ${oppositesPair[1]}! 3D Cartoon Opposites`,
-      topic: `${oppositesPair[0]} vs ${oppositesPair[1]}`,
-      targetDurationSec: 30,
-      scenes: [
-        {
-          id: "scene_1",
-          timestampStart: 0,
-          timestampEnd: 6,
-          title: "The Mystery Hook",
-          narration: `Wait! Look at this! Is it ${oppositesPair[0].toUpperCase()} or is it ${oppositesPair[1].toUpperCase()}?!`,
-          kineticCaptions: ["WAIT!", "LOOK AT THIS!", `IS IT ${oppositesPair[0].toUpperCase()}?`, `OR ${oppositesPair[1].toUpperCase()}?!`],
-          characterA_Action: "surprised_look" as const,
-          characterB_Action: "side_bounce" as const,
-          cameraMode: "hook_close" as const,
-          sfxCue: "whoosh" as const,
-          environmentTheme: environmentTheme as any,
-        },
-        {
-          id: "scene_2",
-          timestampStart: 6,
-          timestampEnd: 13,
-          title: `Meet Character 1: ${oppositesPair[0]}`,
-          narration: `WHOA! Look how super ${oppositesPair[0].toLowerCase()} and mighty it is! STOMP!`,
-          kineticCaptions: ["WHOA!", `SUPER ${oppositesPair[0].toUpperCase()}!`, "FEEL THE GROUND SHAKE!"],
-          characterA_Action: "giant_stomp" as const,
-          characterB_Action: "tremble" as const,
-          cameraMode: "wide_stage" as const,
-          sfxCue: "stomp_rumble" as const,
-          environmentTheme: environmentTheme as any,
-        },
-        {
-          id: "scene_3",
-          timestampStart: 13,
-          timestampEnd: 20,
-          title: `Meet Character 2: ${oppositesPair[1]}`,
-          narration: `Now zoom in! Down here... it is so ${oppositesPair[1].toLowerCase()} and speedy! Boing!`,
-          kineticCaptions: ["ZOOM IN!", `SO ${oppositesPair[1].toUpperCase()}!`, "BOING BOING BOING!"],
-          characterA_Action: "idle_bob" as const,
-          characterB_Action: "rocket_leap" as const,
-          cameraMode: "split_comparison" as const,
-          sfxCue: "boing" as const,
-          environmentTheme: environmentTheme as any,
-        },
-        {
-          id: "scene_4",
-          timestampStart: 20,
-          timestampEnd: 26,
-          title: "The Great Opposites Challenge",
-          narration: `Can they work together? Push, lift, balance! WOW, they did it!`,
-          kineticCaptions: ["CAN THEY DO IT?!", "PUSH!", "LIFT!", "THEY DID IT!"],
-          characterA_Action: "squash_jump" as const,
-          characterB_Action: "speed_dash" as const,
-          cameraMode: "hero_low" as const,
-          sfxCue: "sparkle" as const,
-          environmentTheme: environmentTheme as any,
-        },
-        {
-          id: "scene_5",
-          timestampStart: 26,
-          timestampEnd: 30,
-          title: "Retention Call To Action",
-          narration: `Which one are YOU today? Comment below and subscribe for more 3D adventures!`,
-          kineticCaptions: ["WHICH ARE YOU?", "COMMENT BELOW!", "SUBSCRIBE NOW!"],
-          characterA_Action: "celebrate_spin" as const,
-          characterB_Action: "wave_hands" as const,
-          cameraMode: "wide_stage" as const,
-          sfxCue: "fanfare" as const,
-          environmentTheme: environmentTheme as any,
-        },
-      ],
-      youtubeMetadata: {
-        title: `${oppositesPair[0]} vs ${oppositesPair[1]}! 3D Animation for Kids 🐘✨ #Shorts`,
-        description: `Learn opposites with 3D animated friends! Is it ${oppositesPair[0]} or ${oppositesPair[1]}? 24/7 educational animation by NovaVault Media Studio using zero-cost AI pipelines. Subscribe for daily 3D cartoon learning!\n\n#Shorts #KidsAnimation #3DAnimation #Opposites #KidsLearning #CartoonShorts`,
-        hashtags: ["#Shorts", "#KidsAnimation", "#3DAnimation", "#Opposites", "#Educational"],
-        tags: ["kids animation", "opposites for toddlers", "3d cartoon shorts", "kids learning video", "educational 3d", "zero cost ai studio"],
-        retentionHook: "Pattern interrupt at 0s + question tease resolved at 24s",
-        thumbnailPrompt: "Cute 3D stylized cartoon character duo illustrating opposites, Pixar style, bright colorful lighting, expressive eyes, vibrant contrast, vertical 9:16",
-        ctrPrediction: "12.8% - 15.4% Estimated CTR",
-      },
-      zeroCostScore: "100% Free Tier (Gemini Flash + WebGL + Web Audio)",
-      createdAt: now,
-    };
-
-    // Try AI generation for unique narrative
-    try {
-      const ai = getGenAIClient();
-      const prompt = `You are AgentTube_Producer in NovaVault Media Studio.
-Generate a 30-second interactive 3D animated YouTube Shorts script teaching: "${oppositesPair[0]} vs ${oppositesPair[1]}".
-Target duration: EXACTLY 30 seconds across 5 scenes:
-Scene 1: 0-6s Hook
-Scene 2: 6-13s Character 1 (${oppositesPair[0]})
-Scene 3: 13-20s Character 2 (${oppositesPair[1]})
-Scene 4: 20-26s Climax / Interactive payoff
-Scene 5: 26-30s Retention CTA & Subscriber Loop
-
-Provide valid JSON matching the structure:
-{
-  "title": string,
-  "scenes": [
-    {
-      "timestampStart": number,
-      "timestampEnd": number,
-      "title": string,
-      "narration": string,
-      "kineticCaptions": [string],
-      "characterA_Action": "idle_bob" | "giant_stomp" | "squash_jump" | "surprised_look" | "high_five" | "celebrate_spin",
-      "characterB_Action": "micro_flutter" | "speed_dash" | "tremble" | "rocket_leap" | "side_bounce" | "wave_hands",
-      "cameraMode": "hook_close" | "wide_stage" | "split_comparison" | "hero_low",
-      "sfxCue": "boing" | "stomp_rumble" | "whoosh" | "fanfare" | "sparkle"
-    }
-  ],
-  "youtubeMetadata": {
-    "title": string,
-    "description": string,
-    "hashtags": [string],
-    "tags": [string],
-    "retentionHook": string,
-    "thumbnailPrompt": string
-  }
-}`;
-
-      const geminiRes = await ai.models.generateContent({
-        model: PRIMARY_GEMINI_MODEL,
-        contents: prompt,
-        config: {
-          systemInstruction: wrapSystemInstructionWith31ProSkills("You are AgentTube_Producer in NovaVault Media Studio.", "chat"),
-          responseMimeType: "application/json",
-        },
-      });
-
-      const parsed = JSON.parse(geminiRes.text || "{}");
-      if (parsed.scenes && Array.isArray(parsed.scenes) && parsed.scenes.length >= 4) {
-        scriptResult.title = parsed.title || scriptResult.title;
-        scriptResult.scenes = parsed.scenes.map((s: any, idx: number) => ({
-          ...s,
-          id: `scene_${idx + 1}`,
-          environmentTheme: environmentTheme as any,
-        }));
-        if (parsed.youtubeMetadata) {
-          scriptResult.youtubeMetadata = {
-            ...scriptResult.youtubeMetadata,
-            ...parsed.youtubeMetadata,
-          };
-        }
-      }
-    } catch (_e) {
-      // Use fallback
-    }
-
-    // Update tickets status if ticketId passed
-    if (ticketId) {
-      const t = novaVaultState.tickets.find(x => x.id === ticketId);
-      if (t) {
-        t.status = "RENDERED";
-      }
-    }
-
-    novaVaultState.governance.totalShortsPublished += 1;
-    novaVaultState.agents.AgentTube_Producer.ticketsProcessed += 1;
-
-    // Log dialogue step
-    novaVaultState.dialogueLogs.push({
-      id: `spark_step_${currentTick}`,
-      timestamp: now,
-      tick: currentTick,
-      sender: "AgentTube_Producer",
-      receiver: "Synapse_CEO",
-      stepType: "METADATA_OPTIMIZE",
-      message: `[SPARK_DIALOGUE_STEP] AgentTube_Producer rendered 3D short: "${scriptResult.title}" (30s) and optimized YouTube Shorts SEO tags.`,
-      polyvagalState: "ventral",
-      valenceDelta: 0.10,
-      metadata: { shortId: scriptResult.id, duration: 30 },
-    });
-
-    res.json({
-      success: true,
-      project: scriptResult,
-      governance: novaVaultState.governance,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: "Failed to generate short", details: String(err?.message || err) });
-  }
-});
-
-// POST /api/novavault/hires/propose - Governance: propose candidate hire requiring human approval
-app.post("/api/novavault/hires/propose", (req, res) => {
-  try {
-    const {
-      name,
-      role = "Animator",
-      reports_to = "Synapse_CEO",
-      runtime = "HTTP",
-      commandOrEndpoint = "http://localhost:4000/api/heartbeat",
-      job_description,
-      reason,
-      monthly_budget_usd = 0.00
-    } = req.body;
-
-    if (!name || !job_description) {
-      return res.status(400).json({ error: "name and job_description are required" });
-    }
-
-    const candidateId = `cand_${Date.now()}`;
-    const newCandidate = {
-      id: candidateId,
-      name,
-      role,
-      reports_to,
-      runtime: runtime as "HTTP" | "Bash",
-      commandOrEndpoint,
-      monthly_budget_usd: Number(monthly_budget_usd) || 0.00,
-      job_description,
-      reason: reason || "Expand 3D automated production capacity under zero-cost budget.",
-      status: "PENDING_APPROVAL" as const,
-      proposedAt: Date.now(),
-    };
-
-    novaVaultState.candidateHires.unshift(newCandidate);
-    novaVaultState.tickCounter += 1;
-
-    // Log dialogue step
-    novaVaultState.dialogueLogs.push({
-      id: `spark_hire_${Date.now()}`,
-      timestamp: Date.now(),
-      tick: novaVaultState.tickCounter,
-      sender: "Synapse_CEO",
-      receiver: "Board (Human)",
-      stepType: "HIRE_PROPOSAL",
-      message: `[GOVERNANCE NOTICE] Synapse_CEO proposed new hire: ${name} (${role}). Status: PENDING_HUMAN_APPROVAL.`,
-      polyvagalState: "ventral",
-      valenceDelta: 0.03,
-      metadata: { candidateId, requiresApproval: true },
-    });
-
-    res.json({
-      success: true,
-      candidate: newCandidate,
-      governanceRule: "require_human_approval_for_hires: true (Enforced)",
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: "Failed to propose hire", details: String(err?.message || err) });
-  }
-});
-
-// POST /api/novavault/hires/decision - Human Board member approves or rejects candidate hire
-app.post("/api/novavault/hires/decision", (req, res) => {
-  try {
-    const { candidateId, decision } = req.body; // decision: "APPROVE" | "REJECT"
-    const cand = novaVaultState.candidateHires.find(c => c.id === candidateId);
-    if (!cand) {
-      return res.status(404).json({ error: "Candidate not found" });
-    }
-
-    cand.status = decision === "APPROVE" ? "APPROVED" : "REJECTED";
-    novaVaultState.tickCounter += 1;
-
-    if (decision === "APPROVE") {
-      // Add agent to live roster
-      novaVaultState.agents[cand.name] = {
-        name: cand.name,
-        role: cand.role,
-        reports_to: cand.reports_to,
-        runtime: cand.runtime,
-        endpoint: cand.runtime === "HTTP" ? cand.commandOrEndpoint : undefined,
-        command: cand.runtime === "Bash" ? cand.commandOrEndpoint : undefined,
-        monthly_budget_usd: cand.monthly_budget_usd,
-        job_description: cand.job_description,
-        status: "ACTIVE",
-        lastHeartbeat: Date.now(),
-        ticketsProcessed: 0,
-        polyvagal: "ventral",
-      };
-    }
-
-    novaVaultState.dialogueLogs.push({
-      id: `spark_dec_${Date.now()}`,
-      timestamp: Date.now(),
-      tick: novaVaultState.tickCounter,
-      sender: "Board (Human)",
-      receiver: "Synapse_CEO",
-      stepType: "HIRE_PROPOSAL",
-      message: `[HUMAN BOARD DECISION] Board ${decision === "APPROVE" ? "APPROVED" : "REJECTED"} hire candidate ${cand.name} (${cand.role}).`,
-      polyvagalState: "ventral",
-      valenceDelta: decision === "APPROVE" ? 0.10 : -0.05,
-      metadata: { candidateId, decision },
-    });
-
-    res.json({
-      success: true,
-      candidate: cand,
-      agents: Object.values(novaVaultState.agents),
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: "Failed to process decision", details: String(err?.message || err) });
-  }
-});
-
-// GET /api/novavault/workspace-script - Returns bash setup script for local autonomous runner
-app.get("/api/novavault/workspace-script", (_req, res) => {
-  const script = `#!/usr/bin/env bash
-set -e
-
-mkdir -p ~/NovaVault_Workspace && cd ~/NovaVault_Workspace
-
-echo "1. Cloning Paperclip Control Plane (Node.js + React UI)..."
-git clone https://github.com/paperclipai/paperclip.git
-
-echo "2. Cloning YouTube Automation Agent (AgentTube)..."
-git clone https://github.com/darkzOGx/youtube-automation-agent.git
-
-echo "3. Cloning Cua (Open-Source Computer-Use 2.0)..."
-git clone https://github.com/trycua/cua.git
-
-echo "4. Checking Agent-Reach environment..."
-# Verify Agent-Reach channels (Twitter/X, Reddit, YouTube, GitHub, Bilibili, XiaoHongShu)
-if command -v agent-reach &> /dev/null; then
-    agent-reach doctor
-fi
-
-echo "5. Installing & starting YouTube Automation Agent walk-through..."
-cd ~/NovaVault_Workspace/youtube-automation-agent
-npm install
-
-echo "✅ Stack cloned! Set your GEMINI_API_KEY, run 'npx paperclipai' in one terminal, and 'npm start' inside youtube-automation-agent in another."
-`;
-
-  res.setHeader("Content-Type", "text/plain");
-  res.send(script);
 });
 
 // ============================================================================
@@ -3709,7 +3001,11 @@ app.post("/api/bridge/antigravity/dispatch", aiRouteRateLimiter, async (req, res
     const tier: ModelTier =
       modelTier === "tier1-flash" ? "tier1-flash" : "tier2-argon";
     const resolvedModel =
-      tier === "tier2-argon" ? "gemini-4-argon" : "gemini-3.8-flash";
+      tier === "tier2-argon" ? "gemini-4-argon" : "gemini-4-hydrogen";
+    const dispatchCandidates =
+      tier === "tier2-argon"
+        ? getOrderedModelCandidates("complex")
+        : getOrderedModelCandidates("fast");
 
     const userTurnId = `msg-u-${Date.now()}`;
     const timestampStr = new Date().toISOString().slice(11, 19) + " UTC";
@@ -3725,6 +3021,7 @@ app.post("/api/bridge/antigravity/dispatch", aiRouteRateLimiter, async (req, res
     const activeTelemetry = telemetry || currentBridgeState.telemetry;
 
     let responseText = "";
+    let actualModelUsed = resolvedModel;
     try {
       const ai = getGenAIClient();
       const systemInstruction =
@@ -3734,24 +3031,44 @@ app.post("/api/bridge/antigravity/dispatch", aiRouteRateLimiter, async (req, res
         "2. Sentence 1 MUST state the core technical thesis directly. " +
         "3. Reference canonical fs.realpathSync path resolution, UID-bound writeGate enforcement, CSR/CSC sparse matrix bijection across 16 neurons and 39 synapses, and 3-tier telemetry provenance ('Code-Default', 'Simulated-Run', 'Physical-Capture' using 1000.0 / clock_hz). Keep your response concise (2-4 high-density technical sentences).";
 
-      const genResp = await ai.models.generateContent({
-        model: resolvedModel,
-        contents: [
-          {
-            role: "user",
-            parts: [
+      for (const candModel of dispatchCandidates) {
+        try {
+          const genResp = await ai.models.generateContent({
+            model: candModel,
+            contents: [
               {
-                text: `[Antigravity Bridge Context | Model Tier: ${tier} (${resolvedModel}) | Owner UID: ${ownerUid} | Provenance: ${activeTelemetry.provenanceTier} | Sigma: ${activeTelemetry.sigma} | Order r: ${activeTelemetry.orderParameterR} | DRI: ${activeTelemetry.dri} | Latency: ${activeTelemetry.aerLatencyMs ?? "NULL"} ms]\n\nDeveloper Query: ${cleanPrompt}`,
+                role: "user",
+                parts: [
+                  {
+                    text: `[Antigravity Bridge Context | Model Tier: ${tier} (${candModel}) | Owner UID: ${ownerUid} | Provenance: ${activeTelemetry.provenanceTier} | Sigma: ${activeTelemetry.sigma} | Order r: ${activeTelemetry.orderParameterR} | DRI: ${activeTelemetry.dri} | Latency: ${activeTelemetry.aerLatencyMs ?? "NULL"} ms]\n\nDeveloper Query: ${cleanPrompt}`,
+                  },
+                ],
               },
             ],
-          },
-        ],
-        config: {
-          systemInstruction,
-          temperature: 0.25,
-        },
-      });
-      responseText = (genResp.text || "").trim();
+            config: {
+              systemInstruction,
+              ...(candModel !== FALLBACK_FLASH_LITE_MODEL
+                ? {
+                    thinkingConfig: {
+                      thinkingLevel:
+                        tier === "tier2-argon" ? ThinkingLevel.MEDIUM : ThinkingLevel.LOW,
+                    },
+                  }
+                : {}),
+            },
+          });
+          if (genResp && genResp.text) {
+            responseText = sanitizeModelAutoOutput(genResp.text);
+            actualModelUsed = candModel;
+            break;
+          }
+        } catch (innerErr: any) {
+          if (isTransientModelError(innerErr)) markModelQuotaCooled(candModel, 45000);
+        }
+      }
+      if (!responseText) {
+        throw new Error("All candidate models unavailable");
+      }
     } catch {
       // Deterministic f86b5c0 architectural synthesis fallback if offline/rate-limited
       responseText =
@@ -3776,7 +3093,7 @@ app.post("/api/bridge/antigravity/dispatch", aiRouteRateLimiter, async (req, res
     return res.json({
       success: true,
       turn: assistantTurn,
-      modelUsed: resolvedModel,
+      modelUsed: actualModelUsed,
       strippedAffirmation: peeled.strippedAffirmation,
       state: getAntigravityBridgeState(),
     });
@@ -4210,7 +3527,7 @@ Provide 2-3 dense engineering bullet points explaining your mathematical anti-di
     let searchQueries: string[] = [activeBiologicalQuery];
 
     // Prioritize Argon Model (gemini-4-argon) as the terminal structural set builder
-    const models = ["gemini-4-argon", PRIMARY_GEMINI_MODEL, PRO_REASONING_WRAPPER_MODEL, FALLBACK_FLASH_LITE_MODEL];
+    const models = getOrderedModelCandidates("complex");
     const rsiWrappedInstruction = wrapSystemInstructionWith31ProSkills(
       "You are the deep-reasoning autonomous recursive self-improvement and anti-divergence engine for an edge neuromorphic SNN processor. Search empirical biological neuroscience and neuromorphic literature using Google Search to mathematically ground parameter adaptations on proven biological stability mechanisms (Bi & Poo 1998 asymmetric STDP, Turrigiano 2008 homeostatic scaling, BCM theory sliding threshold, Beggs & Plenz 2003 critical branching). Formulate precise numerical parameter adaptations based on the 5-pillar telemetry, enforce the Hard-Locked Stability Plank, and suppress divergence. Output valid Markdown analysis followed by a ```json code block containing recommended parameter values and biological literature findings.",
       "rsi_optimization"
@@ -4261,7 +3578,7 @@ Provide 2-3 dense engineering bullet points explaining your mathematical anti-di
 
       // If search call didn't yield text, retry without search tools
       if (!responseText) {
-        for (const m of [PRIMARY_GEMINI_MODEL, PRO_REASONING_WRAPPER_MODEL, FALLBACK_FLASH_LITE_MODEL]) {
+        for (const m of getOrderedModelCandidates("general")) {
           if (isModelQuotaCooled(m)) continue;
           try {
             const resp = await ai.models.generateContent({
@@ -4693,9 +4010,9 @@ CRITICAL: At the very end of your response, output a structured JSON block enclo
 \`\`\``;
 
     let analysis = "";
-    let usedModel = "gemini-4-argon (Primary Bio-RSI Argon + Spark/3.8 Eval Tier)";
+    let usedModel = "gemini-4-argon (Primary Bio-RSI Argon + Spark/Hydrogen Eval Tier)";
     let searchGrounding: any = null;
-    const diagnosticCandidates = [PRIMARY_GEMINI_MODEL, PRO_REASONING_WRAPPER_MODEL, FALLBACK_FLASH_LITE_MODEL];
+    const diagnosticCandidates = getOrderedModelCandidates("general");
     const auditSystemInstruction = wrapSystemInstructionWith31ProSkills(
       "You are the Primary Neuromorphic Intelligence running on Gemini 4 Argon (models/gemini-4-argon), receiving normalized 5-pillar SNN telemetry and pre-validated Spark (3.1-Pro) & 3.8-Flash benchmark traces. Output the comprehensive 5-pillar Markdown assessment and closing JSON parameter block.",
       "telemetry_audit"
@@ -4718,6 +4035,7 @@ CRITICAL: At the very end of your response, output a structured JSON block enclo
             break;
           }
         } catch (dErr: any) {
+          if (isTransientModelError(dErr)) markModelQuotaCooled(dModel, 45000);
           console.warn(`[Diagnostic] Candidate ${dModel} notice: ${cleanErrorMessage(dErr)}. Trying resilient fallback...`);
         }
       }
@@ -5043,7 +4361,7 @@ Format your response as a JSON object:
     let aiResult: any = null;
     let usedModel = "gemini-4-argon (Argon Bio-RSI Primary)";
     if (ai && anomalyCount > 0) {
-      const candidates = [PRIMARY_GEMINI_MODEL, PRO_REASONING_WRAPPER_MODEL, FALLBACK_FLASH_LITE_MODEL];
+      const candidates = getOrderedModelCandidates("general");
       const healthWrappedInstruction = wrapSystemInstructionWith31ProSkills(
         "You are an autonomous SNN diagnostics engine running on Gemini 4 Argon (models/gemini-4-argon). Analyze multi-subsystem telemetry buffers and output strictly valid JSON matching the schema.",
         "telemetry_audit"
@@ -5066,7 +4384,8 @@ Format your response as a JSON object:
               break;
             }
           }
-        } catch (_err) {
+        } catch (_err: any) {
+          if (isTransientModelError(_err)) markModelQuotaCooled(model, 45000);
           // fallback to next model or edge logic
         }
       }

@@ -11,9 +11,9 @@
  *    nonlinear stability invariants (Lyapunov λ, Branching Ratio σ, Fano Factor,
  *    Kurtosis) and enforces the Hard-Locked Stability Plank (A- / A+ >= 1.25,
  *    learning rate η <= 0.55) to produce a formal reasoning trace.
- * 3. 3.8-FLASH EXECUTION PIPELINE (`gemini-3.8-flash`): Passes the normalized
+ * 3. GEMINI 4 HYDROGEN EXECUTION PIPELINE (`gemini-4-hydrogen`): Passes the normalized
  *    prompt, 3.1-Pro reasoning trace, and pre-validated parameter bounds to
- *    `gemini-3.8-flash` for low-latency synthesis and live SNN substrate execution.
+ *    `gemini-4-hydrogen` for low-latency synthesis and live SNN substrate execution.
  */
 
 import { HardwareTelemetry, SNNTuningConfig, WatchdogProposalDecision, ShadowTrialResult } from '../types';

@@ -457,7 +457,7 @@ export const AntigravityBridgeWorkspace: React.FC = () => {
                     Tier-1: Fast Workspace Sync
                   </div>
                   <div className="text-[11px] text-slate-400">
-                    gemini-3.8-flash • Sub-second telemetry & file queries
+                    gemini-4-hydrogen • Sub-second telemetry & file queries
                   </div>
                 </div>
               </button>
@@ -597,7 +597,7 @@ export const AntigravityBridgeWorkspace: React.FC = () => {
                 Active Route:{" "}
                 {selectedModelTier === "tier2-argon"
                   ? "gemini-4-argon"
-                  : "gemini-3.8-flash"}
+                  : "gemini-4-hydrogen"}
               </span>
             </header>
 

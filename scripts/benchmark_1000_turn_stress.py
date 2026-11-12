@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from synapse_edge_governor import (
+from synapse_governor import (
     R_TARGET,
     SynapseEdgeMiddleware,
 )

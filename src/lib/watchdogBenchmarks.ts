@@ -82,7 +82,7 @@ export interface StabilityBenchmark500TickResult {
 
 /**
  * Executes a 500-tick recursive shadow-simulation using Spark Agent evaluation logic
- * (`gemini-4-argon` / Argon Volece Evaluator + `gemini-3.8-flash` Reviewer), evaluating
+ * (`gemini-4-argon` / Argon Volece Evaluator + `gemini-4-hydrogen` Reviewer), evaluating
  * Branching Ratio (σ), Divergence Risk Index (DRI), and Synaptic Stability against
  * Hard-Locked Stability Plank limits.
  */
@@ -238,7 +238,7 @@ export function runStabilityBenchmark(params?: {
     totalShadowTicks,
     projectionGain,
     evaluatorModel: 'gemini-4-argon',
-    reviewerModel: 'gemini-3.8-flash',
+    reviewerModel: 'gemini-4-hydrogen',
     firmwareStateBefore: firmwareBefore,
     firmwareStateAfter: firmwareAfter,
     branchingRatioBefore: firmwareBefore.branching_ratio_sigma,

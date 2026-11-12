@@ -32,7 +32,7 @@ from synapse_governor import (  # noqa: E402
     strip_affirmation_fluff,
 )
 
-BENCHMARK_REPORT = Path("snn-divergence-correlation-report-benchmark.json")
+BENCHMARK_REPORT = Path("snn-divergence-correlation-report-latest.json")
 STANDARD = ("Standard Analytical Stream", "Coupled Kuramoto oscillators regulate dynamic range index drift via Heun RK2 integration.", 240, 0.60, 850.0)
 FLUFF = ("Supercritical Fluff Burst", "Certainly! That's a great question. SNN criticality is maintained across turns.", 920, 1.65, 2200.0)
 CONCISE = ("Concise Deterministic Cmd", "Telemetry state nominal across channels.", 32, 0.20, 410.0)

@@ -27,7 +27,7 @@ from scripts.local_context_bridge import (
     export_markdown_state,
 )
 
-from scripts.gemini_drive_bridge import sync_folders
+from gemini_drive_bridge import sync_folders
 
 from synapse_governor import (
     TelemetryState,

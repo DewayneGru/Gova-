@@ -164,7 +164,6 @@ export type SubstrateTab =
   | 'sae'
   | 'driftguard'
   | 'robotics'
-  | 'novavault'
   | 'gova'
   | 'chat'
   | 'image'
@@ -1243,109 +1242,6 @@ export interface OnlineToolExecutionResult {
   success: boolean;
   output: any;
   message: string;
-}
-
-// ============================================================================
-// NovaVault Media Studio (Autonomous 3D YouTube Shorts Agency) Interfaces
-// ============================================================================
-
-export type NovaVaultAgentRole = 'CEO' | 'Marketer' | 'Engineer' | 'Animator' | 'SoundDesigner';
-
-export interface NovaVaultAgent {
-  name: string;
-  role: NovaVaultAgentRole;
-  reports_to: string;
-  runtime: 'HTTP' | 'Bash';
-  endpoint?: string;
-  command?: string;
-  monthly_budget_usd: number;
-  job_description: string;
-  status: 'IDLE' | 'ACTIVE' | 'PROCESSING' | 'ERROR';
-  lastHeartbeat: number;
-  ticketsProcessed: number;
-  polyvagal: 'ventral' | 'sympathetic' | 'dorsal_low' | 'neutral';
-}
-
-export interface NovaVaultGovernance {
-  require_human_approval_for_hires: boolean;
-  auto_stop_on_budget_limit: boolean;
-  current_spend_usd: number;
-  max_budget_usd: number;
-  totalTicketsCreated: number;
-  totalShortsPublished: number;
-}
-
-export interface NovaVaultTopicTicket {
-  id: string;
-  title: string;
-  concept: string;
-  targetAudience: string;
-  viralHook: string;
-  status: 'SCOUTED' | 'PRODUCING' | 'RENDERED' | 'QUEUED';
-  assignedTo: string;
-  createdAt: number;
-  completedAt?: number;
-  oppositesPair: [string, string];
-}
-
-export interface SparkDialogueStep {
-  id: string;
-  timestamp: number;
-  tick: number;
-  sender: string;
-  receiver: string;
-  stepType: 'TICKET_DISPATCH' | 'SCOUT_RETURN' | 'SCENE_GEN' | 'METADATA_OPTIMIZE' | 'HEARTBEAT' | 'HIRE_PROPOSAL';
-  message: string;
-  polyvagalState: string;
-  valenceDelta: number;
-  metadata?: Record<string, any>;
-}
-
-export interface AnimatedShortScene {
-  id: string;
-  timestampStart: number;
-  timestampEnd: number;
-  title: string;
-  narration: string;
-  kineticCaptions: string[];
-  characterA_Action: 'idle_bob' | 'giant_stomp' | 'squash_jump' | 'surprised_look' | 'high_five' | 'celebrate_spin';
-  characterB_Action: 'micro_flutter' | 'speed_dash' | 'tremble' | 'rocket_leap' | 'side_bounce' | 'wave_hands';
-  cameraMode: 'hook_close' | 'wide_stage' | 'split_comparison' | 'hero_low';
-  sfxCue: 'boing' | 'stomp_rumble' | 'whoosh' | 'fanfare' | 'sparkle';
-  environmentTheme: 'lava_and_ice' | 'micro_macro' | 'cartoon_meadow' | 'neon_circus';
-}
-
-export interface AnimatedShortProject {
-  id: string;
-  title: string;
-  topic: string;
-  targetDurationSec: number;
-  scenes: AnimatedShortScene[];
-  youtubeMetadata: {
-    title: string;
-    description: string;
-    hashtags: string[];
-    tags: string[];
-    retentionHook: string;
-    thumbnailPrompt: string;
-    ctrPrediction: string;
-  };
-  zeroCostScore: string;
-  createdAt: number;
-}
-
-export interface CandidateAgentHire {
-  id: string;
-  name: string;
-  role: NovaVaultAgentRole;
-  reports_to: string;
-  runtime: 'HTTP' | 'Bash';
-  commandOrEndpoint: string;
-  monthly_budget_usd: number;
-  job_description: string;
-  reason: string;
-  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
-  proposedAt: number;
 }
 
 // ============================================================================

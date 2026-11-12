@@ -34,7 +34,6 @@ import {
 } from './types';
 import { SAEMonosemanticityPanel } from './components/SAEMonosemanticityPanel';
 import { SynapticDriftGuardPanel } from './components/SynapticDriftGuardPanel';
-import { NovaVaultStudioPanel } from './components/NovaVaultStudioPanel';
 import { ArgonRoboticsStudio } from './components/ArgonRoboticsStudio';
 import { SNNPersonalityManager } from './components/SNNPersonalityManager';
 import { useAudioVoice } from './context/AudioContext';
@@ -49,18 +48,15 @@ import {
   ShieldCheck,
   ShieldAlert,
   Radio,
-  FolderOpen,
   Activity,
   Heart,
   Layers,
-  Film,
   HandMetal,
   FolderSync,
   ArrowRight,
   TrendingUp,
   HardDrive,
 } from 'lucide-react';
-import { GeminiBridgeModal } from './components/GeminiBridgeModal';
 import { globalTelemetryHealthMonitor } from './lib/telemetryHealthMonitor';
 import { UnifiedTelemetryHealthMonitorPanel } from './components/UnifiedTelemetryHealthMonitorPanel';
 import { DriftVelocityAlertToast } from './components/DriftVelocityAlertToast';
@@ -99,7 +95,6 @@ const MemoizedHeaderTelemetry = React.memo(HeaderTelemetry);
 const MemoizedSubsystemHeartbeatMonitor = React.memo(SubsystemHeartbeatMonitor);
 const MemoizedSAEMonosemanticityPanel = React.memo(SAEMonosemanticityPanel);
 const MemoizedSynapticDriftGuardPanel = React.memo(SynapticDriftGuardPanel);
-const MemoizedNovaVaultStudioPanel = React.memo(NovaVaultStudioPanel);
 const MemoizedArgonRoboticsStudio = React.memo(ArgonRoboticsStudio);
 
 export default function App() {
@@ -168,8 +163,6 @@ export default function App() {
     result: ShadowTrialResult | null;
   }>({ active: false, result: null });
   const [homeostaticScalingActive, setHomeostaticScalingActive] = useState<boolean>(false);
-  const [isBridgeOpen, setIsBridgeOpen] = useState<boolean>(false);
-  const [bridgeInitialTab, setBridgeInitialTab] = useState<'overview' | 'drive_sync'>('overview');
   const lastEpochAppliedTimeRef = useRef<number>(0);
   const lastEpochBaselineDriRef = useRef<number>(0);
 
@@ -1005,22 +998,6 @@ export default function App() {
               </span>
             </button>
 
-            {/* NovaVault Media Studio (Autonomous 3D YouTube Shorts Agency) */}
-            <button
-              onClick={() => setActiveTab('novavault')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'novavault'
-                  ? 'bg-gradient-to-r from-purple-600 via-pink-600 to-indigo-600 text-white shadow-md shadow-purple-600/30 ring-1 ring-purple-400/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <Film className="w-3.5 h-3.5 text-pink-400" />
-              <span>NovaVault 3D Studio</span>
-              <span className="text-[9px] bg-purple-500/20 px-1.5 py-0.2 rounded text-purple-300 font-mono">
-                Shorts 24/7
-              </span>
-            </button>
-
             {/* Gova Broadcaster Architecture & Live API Hub */}
             <button
               onClick={() => setActiveTab('gova')}
@@ -1086,30 +1063,18 @@ export default function App() {
 
           <div className="flex items-center gap-2 text-xs">
             <button
-              onClick={() => setActiveTab('drive')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                activeTab === 'drive'
-                  ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm'
-                  : 'bg-indigo-600/25 hover:bg-indigo-600/40 border-indigo-500/40 text-indigo-200'
+              onClick={() => setActiveTab('antigravity')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                activeTab === 'antigravity'
+                  ? 'bg-gradient-to-r from-indigo-600 via-violet-600 to-emerald-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-emerald-400/40'
+                  : 'bg-gradient-to-r from-sky-600 via-indigo-600 to-purple-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-md shadow-sky-600/25'
               }`}
-              title="Open Google Drive Workspace Sync & Storage Quota Tracker"
-            >
-              <FolderOpen className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Google Drive</span>
-            </button>
-
-            <button
-              onClick={() => {
-                setBridgeInitialTab('overview');
-                setIsBridgeOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-sky-600 via-indigo-600 to-purple-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-md shadow-sky-600/25 transition-all cursor-pointer"
-              title="Open Gemini <-> Google AI Studio Cognitive Bridge"
+              title="Open Gova <-> Google Antigravity Unified Bridge Workspace"
             >
               <FolderSync className="w-3.5 h-3.5 text-sky-200" />
-              <span>AI Studio Bridge</span>
+              <span>Antigravity Bridge</span>
               <span className="text-[9px] bg-white/20 px-1.5 py-0.2 rounded font-mono">
-                Drive / Local
+                f86b5c0
               </span>
             </button>
 
@@ -1528,9 +1493,6 @@ export default function App() {
           />
         )}
 
-        {/* Tab: NovaVault Media Studio (Autonomous 3D YouTube Shorts Agency) */}
-        {activeTab === 'novavault' && <MemoizedNovaVaultStudioPanel />}
-
         {/* Tab: Gemini Argon: Neuromorphic Robotics Helping Hand */}
         {activeTab === 'robotics' && <MemoizedArgonRoboticsStudio engine={engine} />}
 
@@ -1560,26 +1522,6 @@ export default function App() {
 
       {/* Persistent Audio Streaming Queue Bar */}
       <AudioStreamingQueueBar />
-
-      {/* Gemini <-> AI Studio Cognitive Bridge Modal */}
-      <GeminiBridgeModal
-        isOpen={isBridgeOpen}
-        onClose={() => setIsBridgeOpen(false)}
-        initialTab={bridgeInitialTab}
-        telemetry={telemetry}
-        tuningConfig={activeTuning}
-        driftSnapshot={driftGuardSnapshot}
-        onApplyAdjustments={(adj) => {
-          if (!engineRef.current) return;
-          engineRef.current.applyModelAdjustments(adj);
-          setActiveTuning({ ...engineRef.current.getTuningConfig() });
-          setStdpConfig({ ...engineRef.current.stdpConfig });
-        }}
-        onNavigateToWatchdogStudio={() => {
-          setIsBridgeOpen(false);
-          setActiveTab('watchdog');
-        }}
-      />
     </div>
   );
 }

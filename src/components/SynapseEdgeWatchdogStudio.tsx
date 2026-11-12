@@ -457,7 +457,7 @@ export function useUnifiedSparkEvaluationHook(params: {
       suiteType: benchmarkResult.suiteType,
       ruleVersion,
       evaluatorModel: 'gemini-4-argon',
-      reviewerModel: 'gemini-3.8-flash',
+      reviewerModel: 'gemini-4-hydrogen',
       benchmarkMetrics: {
         totalCases: benchmarkResult.totalCases,
         caughtRiskyCount: benchmarkResult.caughtRiskyCount,
@@ -519,7 +519,7 @@ export function useUnifiedSparkEvaluationHook(params: {
           suiteType: benchmarkResult.suiteType,
           ruleVersion: applyAutoRemodeling ? 'v3_spark_rsi' : ruleVersion,
           evaluatorModel: 'gemini-4-argon',
-          reviewerModel: 'gemini-3.8-flash',
+          reviewerModel: 'gemini-4-hydrogen',
           benchmarkMetrics: {
             totalCases: benchmarkResult.totalCases,
             caughtRiskyCount: applyAutoRemodeling ? benchmarkResult.riskyCount : benchmarkResult.caughtRiskyCount,
@@ -2175,7 +2175,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
                   className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs focus:outline-none focus:border-indigo-500"
                 >
                   <option value="gemini-4-argon">Gemini 4 Argon (Argon Volece Bio-SNN Master & RSI Engine)</option>
-                  <option value="gemini-3.8-flash">Gemini 3.8 Flash + Spark Reviewer</option>
+                  <option value="gemini-4-hydrogen">Gemini 4 Hydrogen + Spark Reviewer</option>
                   <option value="algorithmic-snn-builder">Algorithmic Biological Builder</option>
                 </select>
               </div>
@@ -4363,7 +4363,7 @@ export const SynapseEdgeWatchdogStudio: React.FC<SynapseEdgeWatchdogStudioProps>
             </span>
             <span className="text-[10px] text-slate-400">
               Evaluated by <strong className="text-indigo-300">gemini-4-argon (Argon Volece)</strong> &amp;{' '}
-              <strong className="text-sky-300">gemini-3.8-flash</strong>
+              <strong className="text-sky-300">gemini-4-hydrogen</strong>
             </span>
           </div>
 

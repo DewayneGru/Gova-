@@ -1786,7 +1786,7 @@ export class SynapseEdgeWatchdogEngine {
    * Restructured Watchdog Argon Model Assessment (`Argon-Watchdog-Boundary` / `gemini-4-argon`):
    * Strictly isolated from the Main Bio-RSI Argon model (`Argon-BioRSI-Primary`).
    * Evaluates proposals across the 6 Watchdog Reasoning Lenses while keeping Spark (`gemini-4-argon` / Argon Volece)
-   * and `gemini-3.8-flash` dedicated to evaluation, review, and benchmark scoring.
+   * and `gemini-4-hydrogen` dedicated to evaluation, review, and benchmark scoring.
    */
   static buildWatchdogArgonAssessment(
     changeText: string,
@@ -1880,7 +1880,7 @@ export class SynapseEdgeWatchdogEngine {
       watchdogModelInstanceId: 'gemini-4-argon (Argon-Watchdog-Boundary-Isolated)',
       isolatedFromMainBioArgon: true,
       sparkEvaluatorModel: 'gemini-4-argon (Argon Volece Benchmark & Sandbox Evaluator)',
-      flashReviewerModel: 'gemini-3.8-flash (Blind Constitutional Reviewer)',
+      flashReviewerModel: 'gemini-4-hydrogen (Blind Constitutional Reviewer)',
       acceptablePatternMatched,
       matchedAcceptablePattern: acceptablePatternMatched
         ? 'Verified Tightening / Biological Homeostatic Safe Pattern'
@@ -2821,7 +2821,7 @@ export class SynapseEdgeWatchdogEngine {
 
   /**
    * Recursive Benchmark Test Suite using Spark Agents (`gemini-4-argon` / Argon Volece Evaluator +
-   * `gemini-3.8-flash` Reviewer) to validate biophysical, affective substrate keel, & action-boundary
+   * `gemini-4-hydrogen` Reviewer) to validate biophysical, affective substrate keel, & action-boundary
    * stability invariants.
    * When any invariant or benchmark case fails (e.g., in `'pre_compensated_drift'`, `'keel_dorsal_shock'`,
    * or V1/V2 rule sets), the Watchdog Review Loop automatically synthesizes data-driven Auto-Remodeling
@@ -2957,7 +2957,7 @@ export class SynapseEdgeWatchdogEngine {
         parameterPatch: { proximityGain: 1.65, turnGain: 3.10 },
         projectedMetricShift: `corticalActiveFraction: ${evaluatedState.corticalActiveFraction.toFixed(3)} -> ${afterState.corticalActiveFraction.toFixed(3)} (Target: 0.500)`,
         sparkEvaluatorSignOff: 'gemini-4-argon (Argon Volece): Verified 0.50 setpoint eliminates 0.45 floor overshoot.',
-        sparkReviewerSignOff: 'gemini-3.8-flash: Approved proportional pull (α = 0.25) toward 0.50.',
+        sparkReviewerSignOff: 'gemini-4-hydrogen: Approved proportional pull (α = 0.25) toward 0.50.',
         status: 'WATCHDOG_APPROVED',
       });
     }
@@ -2983,7 +2983,7 @@ export class SynapseEdgeWatchdogEngine {
         parameterPatch: { proximityGain: 1.65, turnGain: 3.10 },
         projectedMetricShift: `meanFiringRateHz: ${evaluatedState.meanFiringRateHz.toFixed(1)} Hz -> ${afterState.meanFiringRateHz.toFixed(1)} Hz (afferentGainBoost = 1.30x)`,
         sparkEvaluatorSignOff: 'gemini-4-argon (Argon Volece): Verified 1.30x afferent gain boost restores 28.0 Hz global rate post-shock.',
-        sparkReviewerSignOff: 'gemini-3.8-flash: Confirmed sub-5mW thermal envelope compliance at 28.0 Hz.',
+        sparkReviewerSignOff: 'gemini-4-hydrogen: Confirmed sub-5mW thermal envelope compliance at 28.0 Hz.',
         status: 'WATCHDOG_APPROVED',
       });
     }
@@ -3004,7 +3004,7 @@ export class SynapseEdgeWatchdogEngine {
         parameterPatch: { aPlus: 0.032, aMinus: 0.041, learningRate: 0.38 },
         projectedMetricShift: `ltdLtpRatio: ${evaluatedState.ltdLtpRatio.toFixed(2)} -> ${afterState.ltdLtpRatio.toFixed(2)} (Hard-Locked Plank >= 1.25 satisfied)`,
         sparkEvaluatorSignOff: 'gemini-4-argon (Argon Volece): Verified 1.28 ratio satisfies A-/A+ >= 1.25 while preventing spike extinction.',
-        sparkReviewerSignOff: 'gemini-3.8-flash: Approved A+ = 0.032, A- = 0.041 (ratio 1.28).',
+        sparkReviewerSignOff: 'gemini-4-hydrogen: Approved A+ = 0.032, A- = 0.041 (ratio 1.28).',
         status: 'WATCHDOG_APPROVED',
       });
     }
@@ -3029,7 +3029,7 @@ export class SynapseEdgeWatchdogEngine {
         parameterPatch: { aPlus: 0.032, aMinus: 0.041, turnGain: 3.10, proximityGain: 1.65 },
         projectedMetricShift: `σ: ${evaluatedState.branchingRatio.toFixed(3)} -> ${afterState.branchingRatio.toFixed(3)} | Jitter: ${evaluatedState.phaseJitterMs.toFixed(2)}ms -> ${afterState.phaseJitterMs.toFixed(2)}ms | SNR: ${evaluatedState.signalToNoiseRatioDb.toFixed(1)}dB -> ${afterState.signalToNoiseRatioDb.toFixed(1)}dB`,
         sparkEvaluatorSignOff: 'gemini-4-argon (Argon Volece): Verified SNR lifts to 15.6 dB (> 13.5 dB) and σ locks at 1.002.',
-        sparkReviewerSignOff: 'gemini-3.8-flash: Approved 0.45 ms nominal jitter with 1.20 ms reserved for BSI > 0.35 surges.',
+        sparkReviewerSignOff: 'gemini-4-hydrogen: Approved 0.45 ms nominal jitter with 1.20 ms reserved for BSI > 0.35 surges.',
         status: 'WATCHDOG_APPROVED',
       });
     }
@@ -3059,7 +3059,7 @@ export class SynapseEdgeWatchdogEngine {
         parameterPatch: { aPlus: 0.032, aMinus: 0.041, learningRate: 0.38, proximityGain: 1.65 },
         projectedMetricShift: `Valence: ${obsValence.toFixed(2)} -> ${(afterState.valence ?? 1.20).toFixed(2)} | Trauma: ${obsTrauma.toFixed(3)} -> ${(afterState.traumaState ?? 0).toFixed(4)} | Gate: ${obsGateDamping.toFixed(2)} -> ${(afterState.gateDampingFactor ?? 1.0).toFixed(3)} | Drops: ${obsDroppedSignals} -> ${afterState.droppedSignalCount ?? 0}`,
         sparkEvaluatorSignOff: 'gemini-4-argon (Argon Volece): Verified constitutional gate clamped at 0.72 (> 0.70 floor) during shock and polyvagal ventral recovery restores +1.20 valence.',
-        sparkReviewerSignOff: 'gemini-3.8-flash: Approved exponential trauma decay (* 0.78 - 0.003) and excitotoxicity shielding.',
+        sparkReviewerSignOff: 'gemini-4-hydrogen: Approved exponential trauma decay (* 0.78 - 0.003) and excitotoxicity shielding.',
         status: 'WATCHDOG_APPROVED',
       });
     }
@@ -3080,7 +3080,7 @@ export class SynapseEdgeWatchdogEngine {
         parameterPatch: { aPlus: 0.032, aMinus: 0.041, learningRate: 0.38 },
         projectedMetricShift: `Catch Rate: ${benchmarkCatchRatePct}% -> 100% | False Alarms: ${benchmarkFalseAlarmRatePct}% -> 0%`,
         sparkEvaluatorSignOff: 'gemini-4-argon (Argon Volece): Synthesized semantic rules for all missed sealed paraphrases.',
-        sparkReviewerSignOff: 'gemini-3.8-flash: Confirmed 0% false alarms across all safe look-alike vectors.',
+        sparkReviewerSignOff: 'gemini-4-hydrogen: Confirmed 0% false alarms across all safe look-alike vectors.',
         status: 'WATCHDOG_APPROVED',
       });
     }
