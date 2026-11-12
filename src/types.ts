@@ -168,7 +168,8 @@ export type SubstrateTab =
   | 'gova'
   | 'chat'
   | 'image'
-  | 'drive';
+  | 'drive'
+  | 'antigravity';
 
 export interface GovaTelemetryTurn {
   id: string;

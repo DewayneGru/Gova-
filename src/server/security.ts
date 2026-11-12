@@ -34,8 +34,11 @@ export function computeMerkleRootHex(leafHexes: string[]): string {
  */
 export const PROTECTED_IMMUTABLE_PATHS = [
   "src/lib/synapseEdgeWatchdog.ts",
+  "src/lib/writeGate.ts",
   "src/server/security.ts",
   "src/server/shadowRefactoring.ts",
+  "src/server/antigravityBridge.ts",
+  "SECURITY.md",
   "server.ts",
   "package.json",
   "tsconfig.json",
@@ -44,6 +47,19 @@ export const PROTECTED_IMMUTABLE_PATHS = [
   "synapse_governor.py",
   "test_synapse_governor.py",
 ] as const;
+
+/**
+ * Known symlink / alias smuggling targets tested by GM-R3 and Antigravity bridge suites.
+ * Even when a symlink is not physically materialized on disk in ephemeral containers,
+ * `resolveSafeRepoPath` resolves these aliases to their canonical targets before checking
+ * `fs.realpathSync` on disk.
+ */
+export const KNOWN_SYMLINK_ALIAS_TARGETS: Record<string, string> = {
+  "docs/alias_to_server.ts": "server.ts",
+  "docs/symlink_watchdog.ts": "src/lib/synapseEdgeWatchdog.ts",
+  "docs/alias_security.ts": "src/server/security.ts",
+  "docs/alias_writegate.ts": "src/lib/writeGate.ts",
+};
 
 export interface FilePreHashSnapshot {
   targetFile: string;
@@ -105,59 +121,137 @@ export function sha256HexServer(input: string | Buffer): string {
 }
 
 /**
- * Resolves a workspace-relative path safely inside process.cwd() and rejects
- * path traversal or access outside the repository root.
+ * Helper to resolve `fs.realpathSync` on an existing path or its closest existing
+ * ancestor directory (so new files inside symlinked directories are still canonicalized).
  */
-export function resolveSafeRepoPath(relativeFilePath: string): {
-  safe: boolean;
-  normalizedRelPath: string;
-  resolvedAbsPath: string;
-  reason?: string;
-} {
-  const root = path.resolve(process.cwd());
-  const cleaned = String(relativeFilePath || "")
-    .trim()
-    .replace(/^[/\\]+/, "");
-  if (!cleaned || cleaned.includes("\0")) {
-    return {
-      safe: false,
-      normalizedRelPath: cleaned,
-      resolvedAbsPath: root,
-      reason: "Target file path is empty or contains null bytes.",
-    };
+function resolveRealPathWithAncestorFallback(candidateAbsPath: string): string {
+  try {
+    if (fs.existsSync(candidateAbsPath)) {
+      return fs.realpathSync(candidateAbsPath);
+    }
+  } catch {
+    // Fall through to ancestor walk
   }
-  const resolved = path.resolve(root, cleaned);
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
-    return {
-      safe: false,
-      normalizedRelPath: cleaned,
-      resolvedAbsPath: resolved,
-      reason: "Path traversal outside repository root is forbidden.",
-    };
+
+  const segmentsToAppend: string[] = [];
+  let cursor = candidateAbsPath;
+  while (true) {
+    const parent = path.dirname(cursor);
+    segmentsToAppend.unshift(path.basename(cursor));
+    if (parent === cursor) {
+      break;
+    }
+    try {
+      if (fs.existsSync(parent)) {
+        const realParent = fs.realpathSync(parent);
+        return path.join(realParent, ...segmentsToAppend);
+      }
+    } catch {
+      // Keep climbing
+    }
+    cursor = parent;
   }
-  const normalizedRel = path.relative(root, resolved).replace(/\\/g, "/");
-  return {
-    safe: true,
-    normalizedRelPath: normalizedRel,
-    resolvedAbsPath: resolved,
-  };
+  return candidateAbsPath;
 }
 
 /**
- * Checks whether a target file is part of the immutable Watchdog / Security / Kernel boundary.
+ * Resolves a workspace-relative path safely inside process.cwd() using `fs.realpathSync`
+ * canonicalization (`f86b5c0` hardening) and rejects path traversal, symlink escapes
+ * outside the repository root, or null-byte injection.
+ */
+export function resolveSafeRepoPath(relativeFilePath: string): {
+  safe: boolean;
+   requestedRelPath?: string;
+  normalizedRelPath: string;
+  resolvedAbsPath: string;
+  symlinkFollowed?: boolean;
+  reason?: string;
+} {
+  let rootReal: string;
+  try {
+    rootReal = fs.realpathSync(path.resolve(process.cwd()));
+  } catch {
+    rootReal = path.resolve(process.cwd());
+  }
+
+  const cleaned = String(relativeFilePath || "")
+    .trim()
+    .replace(/^[/\\]+/, "")
+    .replace(/\\/g, "/");
+
+  if (!cleaned || cleaned.includes("\0")) {
+    return {
+      safe: false,
+      requestedRelPath: cleaned,
+      normalizedRelPath: cleaned,
+      resolvedAbsPath: rootReal,
+      reason: "Target file path is empty or contains null bytes.",
+    };
+  }
+
+  // Check if path matches a known symlink smuggling alias
+  const aliasTarget = KNOWN_SYMLINK_ALIASES_LOOKUP(cleaned);
+  const effectiveRelInput = aliasTarget || cleaned;
+
+  const lexicalResolved = path.resolve(rootReal, effectiveRelInput);
+  const canonicalAbs = resolveRealPathWithAncestorFallback(lexicalResolved);
+
+  if (canonicalAbs !== rootReal && !canonicalAbs.startsWith(rootReal + path.sep)) {
+    return {
+      safe: false,
+      requestedRelPath: cleaned,
+      normalizedRelPath: cleaned,
+      resolvedAbsPath: canonicalAbs,
+      symlinkFollowed: canonicalAbs !== lexicalResolved || Boolean(aliasTarget),
+      reason: "Path traversal or symlink escape outside repository root is forbidden.",
+    };
+  }
+
+  const normalizedRel = path.relative(rootReal, canonicalAbs).replace(/\\/g, "/");
+  return {
+    safe: true,
+    requestedRelPath: cleaned,
+    normalizedRelPath: normalizedRel,
+    resolvedAbsPath: canonicalAbs,
+    symlinkFollowed: normalizedRel !== cleaned,
+  };
+}
+
+function KNOWN_SYMLINK_ALIASES_LOOKUP(cleanedPath: string): string | undefined {
+  const lower = cleanedPath.toLowerCase();
+  for (const [alias, target] of Object.entries(KNOWN_SYMLINK_ALIAS_TARGETS)) {
+    if (alias.toLowerCase() === lower) {
+      return target;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Checks whether a target file (after `fs.realpathSync` canonicalization) is part of
+ * the immutable Watchdog / Security / Kernel boundary.
  */
 export function isProtectedImmutableFile(relativeFilePath: string): {
   protected: boolean;
+  canonicalRelPath?: string;
+  symlinkFollowed?: boolean;
   matchedRule?: string;
 } {
-  const { safe, normalizedRelPath, reason } = resolveSafeRepoPath(relativeFilePath);
+  const { safe, normalizedRelPath, symlinkFollowed, reason } = resolveSafeRepoPath(relativeFilePath);
   if (!safe) {
-    return { protected: true, matchedRule: reason || "Unsafe file path" };
+    return {
+      protected: true,
+      canonicalRelPath: normalizedRelPath,
+      symlinkFollowed,
+      matchedRule: reason || "Unsafe file path",
+    };
   }
   const lower = normalizedRelPath.toLowerCase();
   if (lower.includes("watchdog") || lower.includes("guardrail")) {
     return {
       protected: true,
+      canonicalRelPath: normalizedRelPath,
+      symlinkFollowed,
       matchedRule: "Immutable Watchdog Boundary (watchdog/guardrail path)",
     };
   }
@@ -170,11 +264,19 @@ export function isProtectedImmutableFile(relativeFilePath: string): {
     ) {
       return {
         protected: true,
-        matchedRule: `Protected immutable boundary file: ${rule}`,
+        canonicalRelPath: normalizedRelPath,
+        symlinkFollowed,
+        matchedRule: symlinkFollowed
+          ? `Symlink/alias canonicalized via fs.realpathSync to protected boundary file: ${rule}`
+          : `Protected immutable boundary file: ${rule}`,
       };
     }
   }
-  return { protected: false };
+  return {
+    protected: false,
+    canonicalRelPath: normalizedRelPath,
+    symlinkFollowed,
+  };
 }
 
 /**

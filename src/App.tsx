@@ -68,12 +68,14 @@ import { SubsystemIntegrityDashboard } from './components/SubsystemIntegrityDash
 import { DiagnosticTrendAnalyzer } from './components/DiagnosticTrendAnalyzer';
 import { SynapseEdgeWatchdogStudio } from './components/SynapseEdgeWatchdogStudio';
 import { GoogleDriveWorkspacePanel } from './components/GoogleDriveWorkspacePanel';
+import { AntigravityBridgeWorkspace } from './components/AntigravityBridgeWorkspace';
 import { globalBackgroundDriveSyncService } from './lib/driveSyncService';
 
 // =========================================================================
 // React.memo Optimization Strategy for Sub-Panels during 30 FPS Render Cycle
 // Ensures only sub-panels receiving updated props are re-rendered
 // =========================================================================
+const MemoizedAntigravityBridgeWorkspace = React.memo(AntigravityBridgeWorkspace);
 const MemoizedGoogleDriveWorkspacePanel = React.memo(GoogleDriveWorkspacePanel);
 const MemoizedSynapseEdgeWatchdogStudio = React.memo(SynapseEdgeWatchdogStudio);
 const MemoizedDiagnosticTrendAnalyzer = React.memo(DiagnosticTrendAnalyzer);
@@ -780,6 +782,22 @@ export default function App() {
             >
               <Cpu className="w-3.5 h-3.5" />
               <span>Neural Topology & Spiking Dynamics</span>
+            </button>
+
+            {/* Gova <-> Google Antigravity Unified Bridge (f86b5c0 Baseline) */}
+            <button
+              onClick={() => setActiveTab('antigravity')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'antigravity'
+                  ? 'bg-gradient-to-r from-indigo-600 via-violet-600 to-emerald-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-emerald-400/50'
+                  : 'text-slate-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-500/30'
+              }`}
+            >
+              <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Antigravity Bridge</span>
+              <span className="text-[9px] bg-emerald-500/20 px-1.5 py-0.2 rounded text-emerald-300 font-mono">
+                f86b5c0
+              </span>
             </button>
 
             {/* SynapseEdge Watchdog Tab (Ghost Protocol Action Boundary) */}
@@ -1535,6 +1553,9 @@ export default function App() {
             }}
           />
         )}
+
+        {/* Tab 10: Gova <-> Google Antigravity Unified Bridge Workspace (f86b5c0 Baseline) */}
+        {activeTab === 'antigravity' && <MemoizedAntigravityBridgeWorkspace />}
       </main>
 
       {/* Persistent Audio Streaming Queue Bar */}

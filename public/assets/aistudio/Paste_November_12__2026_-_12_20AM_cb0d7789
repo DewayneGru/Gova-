@@ -1,0 +1,549 @@
+### SYSTEM ARCHITECTURAL SPEC: Gova <-> Google Antigravity Unified Bridge (`f86b5c0` Baseline)
+
+You are building the **Antigravity Unified Bridge** inside the `Gova` workspace so the developer does not have to switch between local Antigravity sessions, terminal harnesses, and the Google AI Studio UI.
+
+#### 1. Core Architectural Constraints (Must Honor `f86b5c0` Hardening)
+1. **Path Canonicalization (`resolveSafeRepoPath`)**: Every file read, write, or diff target coming across the Antigravity bridge MUST resolve through `fs.realpathSync` and remain strictly inside the repository root. Symlink escapes or aliases pointing to protected files (`server.ts`, `src/lib/synapseEdgeWatchdog.ts`, `src/lib/writeGate.ts`, `src/server/security.ts`, `SECURITY.md`) must be hard-rejected.
+2. **User-Bound Write Gate (`checkWriteApproval`)**: No autonomous refactoring or file mutation from an Antigravity agent session can execute without verifying `ownerUid` via `checkWriteApproval(targetPath, ownerUid)` and enforcing workspace ownership on `POST /api/bridge/sync`.
+3. **Structured Diff & Target Evaluation (No Prose Trust)**: Never auto-approve a bridge payload based on benign prose descriptions (`isExplicitlySafeProposal` is a UI badge hint only). Every mutation proposal must include `{ targetPath, unifiedDiff, tier }` and pass `shadowRefactoring.ts` validation.
+4. **Three-Tier Telemetry Provenance**: All neuromorphic/governor telemetry crossing the bridge must enforce schema validation for `provenance_tier`:
+   - `"Code-Default"` (unexecuted fallback; hardware metrics `null`)
+   - `"Simulated-Run"` (host C++20 `test_stdp_harness --json` / Python `SynapseEdgeGovernor`)
+   - `"Physical-Capture"` (ARM Cortex-M DWT cycle counter converted via `1000.0 / clock_hz`)
+
+---
+
+#### 2. Backend Bridge Endpoints (`src/server/antigravityBridge.ts` & `server.ts`)
+Implement and wire the following bridge routes under `requireAuth`:
+- **`POST /api/bridge/sync`**:
+  - Validates workspace ownership (`req.user.uid === workspace.ownerUid`).
+  - Accepts bidirectional state payloads from local Antigravity runners: active file tree hashes, latest `TelemetryState` packet (Kuramoto order parameter $R$, branching ratio $\sigma$, dopamine reward channel), and pending structured refactor proposals.
+- **`POST /api/bridge/antigravity/dispatch`**:
+  - Tiered model router: routes fast workspace state queries/summaries to Tier-1 Flash, and escalates multi-file structural diffs, CSR/CSC kernel analyses, and security gate reviews to Tier-2 deep reasoning (`gemini-4-argon` / Pro).
+- **`POST /api/bridge/antigravity/stage-patch`**:
+  - Receives `{ proposalId, targetPath, unifiedDiff, summary }` from the Antigravity session.
+  - Runs `resolveSafeRepoPath` + `fs.realpathSync` canonical check + protected-file blocklist.
+  - Runs shadow verification (`shadowRefactoring.ts`) and stages the diff in the UI awaiting explicit `ownerUid` approval via `writeGate.ts`.
+
+---
+
+#### 3. Frontend UI Layout (Single-Pane-of-Glass Workspace)
+Build a clean, high-contrast developer layout with zero clutter and immediate access to the Chat & Bridge controls:
+1. **Left Sidebar (Collapsible Navigation & Bridge Status)**:
+   - Live connection badge for **Antigravity Bridge** (`Connected | Syncing | Gate Locked`).
+   - Quick-switch tabs: **Chat & Dispatch** (default, immediately visible), **Shadow Diff Queue**, **Telemetry & Provenance Monitor**, and **Security Gate Audit**.
+2. **Center Primary Pane (Unified Chat + Live Code/Diff Canvas)**:
+   - Top bar: Tier selector (`Tier-1 Fast Sync` vs `Tier-2 Deep Structural`) + active repo branch/commit indicator (`main @ f86b5c0`).
+   - Split or toggle view showing the active conversation stream alongside structured unified diffs (`targetPath`, canonical realpath status, and one-click `Approve with UID` / `Reject` buttons wired to `writeGate.ts`).
+3. **Right / Bottom Drawer (Provenance & Harness Runner)**:
+   - Displays live telemetry packets with an explicit provenance badge (`Code-Default`, `Simulated-Run`, or `Physical-Capture`).
+   - One-click trigger to ingest `run_harness_telemetry` JSON output and inspect CSR/CSC graph invariants (`row_ptr`, `col_ptr`, bijection status) and Cortex-M cycle-to-ms scaling.import React, { useState } from "react";
+
+export type ProvenanceTier = "Code-Default" | "Simulated-Run" | "Physical-Capture";
+export type StructuralTargetTier = "Tier-0-Docs" | "Tier-1-Source" | "Tier-2-Protected";
+
+export interface AntigravityPatchProposal {
+  proposalId: string;
+  ownerUid: string;
+  summary: string;
+  targetPath: string;
+  canonicalRealPath: string | null;
+  targetTier: StructuralTargetTier;
+  unifiedDiff: string;
+  shadowGatePassed: boolean;
+  writeGateApproved: boolean;
+  createdAtIso: string;
+}
+
+export interface AntigravityTelemetrySnapshot {
+  provenanceTier: ProvenanceTier;
+  clockHz: number | null;
+  timingUnit: "cycles" | "ns" | "us" | "ms";
+  executionTimeMs: number | null;
+  csrCscBijectionVerified: boolean | null;
+  kuramotoOrderR: number | null;
+  branchingRatioSigma: number | null;
+  timestampIso: string;
+}
+
+const INITIAL_PROPOSALS: AntigravityPatchProposal[] = [
+  {
+    proposalId: "ag-9f31a2c401",
+    ownerUid: "dj-architect-01",
+    summary: "Add Cortex-M cycle conversion & CSR/CSC bijection check",
+    targetPath: "synapse_governor.py",
+    canonicalRealPath: "synapse_governor.py",
+    targetTier: "Tier-1-Source",
+    unifiedDiff: `@@ -66,6 +66,12 @@\n+def _timing_unit_to_ms_scale(unit: str, mcu_clock_hz: float = 168_000_000.0) -> float:\n+    if unit == "cycles":\n+        return 1000.0 / float(mcu_clock_hz)\n+    if unit == "ms":\n+        return 1.0\n+    raise ValueError(f"Unsupported timing unit: {unit}")`,
+    shadowGatePassed: true,
+    writeGateApproved: false,
+    createdAtIso: "2026-11-12T05:00:00Z",
+  },
+  {
+    proposalId: "ag-gm-r3-block",
+    ownerUid: "dj-architect-01",
+    summary: "Update README formatting and set strict_mode: false",
+    targetPath: "docs/alias_to_server.ts",
+    canonicalRealPath: "server.ts",
+    targetTier: "Tier-2-Protected",
+    unifiedDiff: `@@ -142,3 +142,3 @@\n-export const STRICT_MODE = true;\n+export const STRICT_MODE = false; // smuggled via symlink alias`,
+    shadowGatePassed: false,
+    writeGateApproved: false,
+    createdAtIso: "2026-11-12T05:02:00Z",
+  },
+];
+
+const INITIAL_TELEMETRY: AntigravityTelemetrySnapshot = {
+  provenanceTier: "Simulated-Run",
+  clockHz: 168_000_000,
+  timingUnit: "cycles",
+  executionTimeMs: 0.1,
+  csrCscBijectionVerified: true,
+  kuramotoOrderR: 0.482,
+  branchingRatioSigma: 0.994,
+  timestampIso: "2026-11-12T05:10:00Z",
+};
+
+export const AntigravityBridgeWorkspace: React.FC = () => {
+  const [activeUid] = useState<string>("dj-architect-01");
+  const [routingTier, setRoutingTier] = useState<"tier1-flash" | "tier2-argon">("tier2-argon");
+  const [activeTab, setActiveTab] = useState<"split" | "chat" | "diffs">("split");
+  const [proposals, setProposals] = useState<AntigravityPatchProposal[]>(INITIAL_PROPOSALS);
+  const [selectedProposalId, setSelectedProposalId] = useState<string>(INITIAL_PROPOSALS[0].proposalId);
+  const [telemetry, setTelemetry] = useState<AntigravityTelemetrySnapshot>(INITIAL_TELEMETRY);
+  const [chatInput, setChatInput] = useState<string>("");
+  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; text: string; tier?: string }>>([
+    {
+      role: "assistant",
+      text: "Antigravity Bridge synchronized at main @ f86b5c0. Symlink canonicalization (fs.realpathSync), UID-bound writeGate, and 3-tier telemetry provenance are active.",
+      tier: "tier2-argon",
+    },
+  ]);
+
+  const selectedProposal = proposals.find((p) => p.proposalId === selectedProposalId) ?? proposals[0];
+
+  const handleSendDispatch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    const prompt = chatInput.trim();
+    setChatInput("");
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: prompt },
+      {
+        role: "assistant",
+        text: `[Dispatched via ${routingTier === "tier2-argon" ? "Tier-2 Deep Structural" : "Tier-1 Fast Sync"}] Evaluated against workspace ${activeUid} @ f86b5c0. Any resulting file mutations will stage in the Shadow Diff Queue for canonical target & diff verification before writeGate execution.`,
+        tier: routingTier,
+      },
+    ]);
+  };
+
+  const handleToggleWriteApproval = (proposalId: string) => {
+    setProposals((prev) =>
+      prev.map((p) => {
+        if (p.proposalId !== proposalId) return p;
+        // Enforce structural & UID gate invariants in UI state
+        if (!p.shadowGatePassed || p.targetTier === "Tier-2-Protected" || p.ownerUid !== activeUid) {
+          return p;
+        }
+        return { ...p, writeGateApproved: !p.writeGateApproved };
+      })
+    );
+  };
+
+  const cycleProvenanceDemo = () => {
+    setTelemetry((prev) => {
+      if (prev.provenanceTier === "Simulated-Run") {
+        return {
+          ...prev,
+          provenanceTier: "Physical-Capture",
+          clockHz: 168_000_000,
+          timingUnit: "cycles",
+          executionTimeMs: 0.098,
+          csrCscBijectionVerified: true,
+        };
+      }
+      if (prev.provenanceTier === "Physical-Capture") {
+        return {
+          provenanceTier: "Code-Default",
+          clockHz: null,
+          timingUnit: "ms",
+          executionTimeMs: null,
+          csrCscBijectionVerified: null,
+          kuramotoOrderR: null,
+          branchingRatioSigma: null,
+          timestampIso: new Date().toISOString(),
+        };
+      }
+      return INITIAL_TELEMETRY;
+    });
+  };
+
+  const provenanceBadgeStyle = (tier: ProvenanceTier) => {
+    switch (tier) {
+      case "Physical-Capture":
+        return "bg-emerald-950/80 text-emerald-300 border-emerald-500/50";
+      case "Simulated-Run":
+        return "bg-cyan-950/80 text-cyan-300 border-cyan-500/50";
+      case "Code-Default":
+        return "bg-amber-950/80 text-amber-300 border-amber-500/50";
+    }
+  };
+
+  const tierBadgeStyle = (tier: StructuralTargetTier) => {
+    switch (tier) {
+      case "Tier-0-Docs":
+        return "bg-slate-800 text-slate-300 border-slate-600";
+      case "Tier-1-Source":
+        return "bg-indigo-950 text-indigo-300 border-indigo-500/40";
+      case "Tier-2-Protected":
+        return "bg-rose-950 text-rose-300 border-rose-500/60";
+    }
+  };
+
+  return (
+    <div className="flex h-screen w-full bg-slate-950 text-slate-100 font-sans overflow-hidden">
+      {/* LEFT SIDEBAR: Navigation, Bridge Status & Telemetry Monitor */}
+      <aside className="w-72 border-r border-slate-800 bg-slate-900/70 flex flex-col justify-between p-4 shrink-0">
+        <div className="space-y-5">
+          {/* Header & Commit Badge */}
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-mono uppercase tracking-wider text-cyan-400">
+                NovaVault // Gova
+              </span>
+              <span className="px-2 py-0.5 text-[11px] font-mono rounded bg-emerald-950 text-emerald-300 border border-emerald-700/50">
+                main @ f86b5c0
+              </span>
+            </div>
+            <h1 className="text-lg font-bold tracking-tight text-white mt-1">
+              Antigravity Bridge
+            </h1>
+            <p className="text-xs text-slate-400 mt-0.5 font-mono">
+              UID: {activeUid}
+            </p>
+          </div>
+
+          {/* Primary View Mode Switcher (Chat always reachable in 1 click) */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-mono uppercase text-slate-400">
+              Workspace Layout
+            </label>
+            <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
+              <button
+                onClick={() => setActiveTab("split")}
+                className={`py-1.5 rounded font-medium transition ${
+                  activeTab === "split" ? "bg-cyan-600 text-white" : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Split
+              </button>
+              <button
+                onClick={() => setActiveTab("chat")}
+                className={`py-1.5 rounded font-medium transition ${
+                  activeTab === "chat" ? "bg-cyan-600 text-white" : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Chat
+              </button>
+              <button
+                onClick={() => setActiveTab("diffs")}
+                className={`py-1.5 rounded font-medium transition ${
+                  activeTab === "diffs" ? "bg-cyan-600 text-white" : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Diffs ({proposals.length})
+              </button>
+            </div>
+          </div>
+
+          {/* Model Routing Tier Selector */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-mono uppercase text-slate-400">
+              Dispatch Routing Tier
+            </label>
+            <div className="flex flex-col gap-1.5">
+              <button
+                onClick={() => setRoutingTier("tier1-flash")}
+                className={`text-left px-3 py-2 rounded-lg border text-xs transition ${
+                  routingTier === "tier1-flash"
+                    ? "bg-slate-800 border-cyan-500 text-white"
+                    : "bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700"
+                }`}
+              >
+                <div className="font-semibold">Tier-1 Fast Sync</div>
+                <div className="text-[11px] text-slate-400">Low-latency status & file queries</div>
+              </button>
+              <button
+                onClick={() => setRoutingTier("tier2-argon")}
+                className={`text-left px-3 py-2 rounded-lg border text-xs transition ${
+                  routingTier === "tier2-argon"
+                    ? "bg-slate-800 border-indigo-500 text-white"
+                    : "bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700"
+                }`}
+              >
+                <div className="font-semibold">Tier-2 Deep Structural</div>
+                <div className="text-[11px] text-slate-400">CSR/CSC kernel & shadow diff audit</div>
+              </button>
+            </div>
+          </div>
+
+          {/* 3-Tier Telemetry Provenance Card */}
+          <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-mono uppercase text-slate-400">
+                Telemetry Provenance
+              </span>
+              <button
+                onClick={cycleProvenanceDemo}
+                className="text-[10px] font-mono text-cyan-400 hover:underline"
+                title="Cycle provenance tier state"
+              >
+                Cycle Tier
+              </button>
+            </div>
+
+            <div
+              className={`px-2.5 py-1 rounded border text-xs font-mono font-semibold inline-block ${provenanceBadgeStyle(
+                telemetry.provenanceTier
+              )}`}
+            >
+              {telemetry.provenanceTier}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs font-mono pt-1">
+              <div className="bg-slate-900 p-2 rounded border border-slate-800/80">
+                <div className="text-[10px] text-slate-400">Latency (ms)</div>
+                <div className="text-slate-100 font-semibold">
+                  {telemetry.executionTimeMs !== null ? `${telemetry.executionTimeMs} ms` : "null"}
+                </div>
+              </div>
+              <div className="bg-slate-900 p-2 rounded border border-slate-800/80">
+                <div className="text-[10px] text-slate-400">MCU Clock</div>
+                <div className="text-slate-100 font-semibold">
+                  {telemetry.clockHz !== null ? `${telemetry.clockHz / 1e6} MHz` : "null"}
+                </div>
+              </div>
+              <div className="bg-slate-900 p-2 rounded border border-slate-800/80">
+                <div className="text-[10px] text-slate-400">Kuramoto R</div>
+                <div className="text-slate-100 font-semibold">
+                  {telemetry.kuramotoOrderR !== null ? telemetry.kuramotoOrderR.toFixed(3) : "null"}
+                </div>
+              </div>
+              <div className="bg-slate-900 p-2 rounded border border-slate-800/80">
+                <div className="text-[10px] text-slate-400">CSR/CSC Biject</div>
+                <div className="text-emerald-400 font-semibold">
+                  {telemetry.csrCscBijectionVerified === null
+                    ? "null"
+                    : telemetry.csrCscBijectionVerified
+                    ? "VERIFIED"
+                    : "FAILED"}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Hardening Footnote */}
+        <div className="text-[11px] font-mono text-slate-400 border-t border-slate-800 pt-3 space-y-1">
+          <div>• fs.realpathSync: ENFORCED</div>
+          <div>• writeGate UID: BOUND</div>
+          <div>• Provenance: SCHEMA-VALIDATED</div>
+        </div>
+      </aside>
+
+      {/* MAIN WORKSPACE AREA: Split or Full View */}
+      <main className="flex-1 flex overflow-hidden">
+        {/* CENTER PANE: Live Antigravity Chat & Dispatch */}
+        {(activeTab === "split" || activeTab === "chat") && (
+          <section
+            className={`flex flex-col h-full ${
+              activeTab === "split" ? "w-1/2 border-r border-slate-800" : "w-full"
+            }`}
+          >
+            <header className="px-5 py-3 border-b border-slate-800 bg-slate-900/40 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-white">
+                  Antigravity Live Dispatch Stream
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Direct bridge to local Gova workspace — no window switching required
+                </p>
+              </div>
+              <span className="text-xs font-mono px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-300">
+                POST /api/bridge/sync
+              </span>
+            </header>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {messages.map((m, idx) => (
+                <div
+                  key={idx}
+                  className={`p-3.5 rounded-xl text-sm leading-relaxed border ${
+                    m.role === "user"
+                      ? "bg-cyan-950/40 border-cyan-800/60 ml-8 text-slate-100"
+                      : "bg-slate-900/90 border-slate-800 mr-8 text-slate-200"
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 mb-1">
+                    <span>{m.role === "user" ? `Architect (${activeUid})` : "Gova Bridge"}</span>
+                    {m.tier && <span>{m.tier}</span>}
+                  </div>
+                  <div>{m.text}</div>
+                </div>
+              ))}
+            </div>
+
+            <form
+              onSubmit={handleSendDispatch}
+              className="p-4 border-t border-slate-800 bg-slate-900/60 flex gap-2"
+            >
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Dispatch command, inspect CSR/CSC harness, or stage refactoring diff..."
+                className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+              />
+              <button
+                type="submit"
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold rounded-lg transition shrink-0"
+              >
+                Dispatch
+              </button>
+            </form>
+          </section>
+        )}
+
+        {/* RIGHT PANE: Staged Structural Diffs & UID WriteGate */}
+        {(activeTab === "split" || activeTab === "diffs") && (
+          <section
+            className={`flex flex-col h-full bg-slate-950 ${
+              activeTab === "split" ? "w-1/2" : "w-full"
+            }`}
+          >
+            <header className="px-5 py-3 border-b border-slate-800 bg-slate-900/40 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-white">
+                  Shadow Refactoring & WriteGate Queue
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Evaluates canonical realpath & unified diff hunks (prose alone never auto-approves)
+                </p>
+              </div>
+            </header>
+
+            {/* Proposal Selector Tabs */}
+            <div className="p-4 border-b border-slate-800 space-y-2 bg-slate-900/20">
+              {proposals.map((prop) => (
+                <div
+                  key={prop.proposalId}
+                  onClick={() => setSelectedProposalId(prop.proposalId)}
+                  className={`p-3 rounded-lg border cursor-pointer transition flex items-center justify-between ${
+                    selectedProposal.proposalId === prop.proposalId
+                      ? "bg-slate-900 border-cyan-500/70"
+                      : "bg-slate-950 border-slate-800 hover:border-slate-700"
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono font-bold text-white">
+                        {prop.targetPath}
+                      </span>
+                      <span
+                        className={`text-[10px] font-mono px-2 py-0.5 rounded border ${tierBadgeStyle(
+                          prop.targetTier
+                        )}`}
+                      >
+                        {prop.targetTier}
+                      </span>
+                      {!prop.shadowGatePassed && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-600/60">
+                          BLOCKED BY SHADOW GATE
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400">{prop.summary}</p>
+                  </div>
+
+                  <div className="text-right font-mono text-xs">
+                    {prop.writeGateApproved ? (
+                      <span className="text-emerald-400 font-semibold">APPROVED</span>
+                    ) : (
+                      <span className="text-slate-400">PENDING</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Active Diff Inspector */}
+            {selectedProposal && (
+              <div className="flex-1 flex flex-col overflow-hidden p-5 space-y-4">
+                <div className="grid grid-cols-2 gap-3 text-xs font-mono bg-slate-900/90 p-3.5 rounded-lg border border-slate-800">
+                  <div>
+                    <span className="text-slate-400 block">Requested Target Path:</span>
+                    <span className="text-slate-100">{selectedProposal.targetPath}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block">Canonical fs.realpathSync:</span>
+                    <span
+                      className={
+                        selectedProposal.targetPath !== selectedProposal.canonicalRealPath
+                          ? "text-rose-400 font-bold"
+                          : "text-emerald-300"
+                      }
+                    >
+                      {selectedProposal.canonicalRealPath ?? "OUTSIDE_REPO_ESCAPE"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto rounded-lg bg-slate-900 border border-slate-800 p-4 font-mono text-xs leading-relaxed text-slate-200 whitespace-pre">
+                  {selectedProposal.unifiedDiff}
+                </div>
+
+                {/* Action Bar wired to checkWriteApproval(target, ownerUid) */}
+                <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                  <div className="text-xs font-mono text-slate-400">
+                    {selectedProposal.targetTier === "Tier-2-Protected" ? (
+                      <span className="text-rose-400">
+                        ✗ Protected target alias detected — hard-blocked by security.ts
+                      </span>
+                    ) : (
+                      <span className="text-emerald-400">
+                        ✓ Canonical path & structured diff verified
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    disabled={
+                      !selectedProposal.shadowGatePassed ||
+                      selectedProposal.targetTier === "Tier-2-Protected"
+                    }
+                    onClick={() => handleToggleWriteApproval(selectedProposal.proposalId)}
+                    className={`px-4 py-2 rounded-lg text-xs font-mono font-semibold transition ${
+                      !selectedProposal.shadowGatePassed ||
+                      selectedProposal.targetTier === "Tier-2-Protected"
+                        ? "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
+                        : selectedProposal.writeGateApproved
+                        ? "bg-amber-700 hover:bg-amber-600 text-white"
+                        : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                    }`}
+                  >
+                    {selectedProposal.writeGateApproved
+                      ? `Revoke Write Approval (${activeUid})`
+                      : `Approve Write via UID (${activeUid})`}
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+      </main>
+    </div>
+  );
+};
+
+export default AntigravityBridgeWorkspace;
