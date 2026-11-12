@@ -168,6 +168,9 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
     autoAudioReadout,
     setAutoAudioReadout,
     preferredVoice,
+    setPreferredVoice,
+    warmthMasterEnabled,
+    setWarmthMasterEnabled,
     speakModelOutput,
     isAudioPlaying,
     stopAudio,
@@ -1037,7 +1040,37 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
             </select>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Expressive Neural Voice Timbre Selector */}
+            <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded px-2 py-0.5 text-[10px]">
+              <span className="text-slate-400">Voice:</span>
+              <select
+                value={preferredVoice}
+                onChange={(e: any) => setPreferredVoice(e.target.value)}
+                className="bg-transparent text-sky-300 font-mono focus:outline-none cursor-pointer"
+                title="Select Gemini 3.8 Expressive TTS Voice Persona"
+              >
+                <option value="Kore" className="bg-slate-900 text-slate-200">Kore (Warm Articulate)</option>
+                <option value="Zephyr" className="bg-slate-900 text-slate-200">Zephyr (Fluid Scientist)</option>
+                <option value="Charon" className="bg-slate-900 text-slate-200">Charon (Deep Broadcast)</option>
+                <option value="Puck" className="bg-slate-900 text-slate-200">Puck (Conversational)</option>
+                <option value="Fenrir" className="bg-slate-900 text-slate-200">Fenrir (Resonant Baritone)</option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setWarmthMasterEnabled(!warmthMasterEnabled)}
+              className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                warmthMasterEnabled
+                  ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+              title="3-Band Web Audio Studio Vocal Warmth & De-Harshing EQ"
+            >
+              {warmthMasterEnabled ? 'Warmth EQ: ON' : 'Warmth EQ: OFF'}
+            </button>
+
             <button
               onClick={() => {
                 if (isAudioPlaying) stopAudio();

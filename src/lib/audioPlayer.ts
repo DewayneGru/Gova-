@@ -19,6 +19,8 @@ export interface SpeechQueueState {
   progressPercent: number;
   voice: 'Kore' | 'Zephyr' | 'Puck' | 'Charon' | 'Fenrir';
   isClientVoice?: boolean;
+  warmthMasterEnabled?: boolean;
+  playbackRate?: number;
 }
 
 // Global Web Audio AudioContext singleton
@@ -34,6 +36,8 @@ let isQueueRunning = false;
 let isQueuePaused = false;
 let sessionUsesClientVoice = false;
 let currentVoice: 'Kore' | 'Zephyr' | 'Puck' | 'Charon' | 'Fenrir' = 'Kore';
+let warmthMasterEnabled = true;
+let currentPlaybackRate = 1.0;
 let prefetchCache = new Map<number, string>(); // chunkIndex -> audioUrl
 let activeAbortController: AbortController | null = null;
 
@@ -89,7 +93,24 @@ export function getCurrentQueueState(): SpeechQueueState {
     progressPercent: isQueueRunning ? Math.min(100, Math.max(0, percent)) : 0,
     voice: currentVoice,
     isClientVoice: sessionUsesClientVoice,
+    warmthMasterEnabled,
+    playbackRate: currentPlaybackRate,
   };
+}
+
+export function setStudioWarmthMaster(enabled: boolean) {
+  warmthMasterEnabled = enabled;
+  notifyListeners();
+}
+
+export function setSpeechPlaybackRate(rate: number) {
+  currentPlaybackRate = Math.max(0.85, Math.min(1.25, rate));
+  if (currentSourceNode) {
+    try {
+      currentSourceNode.playbackRate.value = currentPlaybackRate;
+    } catch {}
+  }
+  notifyListeners();
 }
 
 function notifyListeners() {
@@ -169,6 +190,16 @@ export function prepareSpeechText(raw: string): string {
     .replace(/(\d+)\s*px/gi, '$1 pixels')
     .replace(/\bLTP\b/g, 'Long-Term Potentiation')
     .replace(/\bLTD\b/g, 'Long-Term Depression')
+    .replace(/\bDRI\b/g, 'Dynamic Range Index')
+    .replace(/\bFTLE\b/g, 'Lyapunov exponent')
+    .replace(/\bAER\b/g, 'A E R')
+    .replace(/\bw_eff\b/gi, 'effective weight')
+    .replace(/\bk_gain\b/gi, 'coupling gain')
+    .replace(/\border_parameter_r\b/gi, 'Kuramoto order parameter r')
+    .replace(/<=/g, ' is less than or equal to ')
+    .replace(/>=/g, ' is greater than or equal to ')
+    .replace(/->|→/g, ' leads to ')
+    .replace(/\b([a-z]+)_([a-z0-9_]+)\b/gi, (_m, p1, p2) => `${p1} ${p2.replace(/_/g, ' ')}`)
     .replace(/\bapprox\b/gi, 'approximately')
     .replace(/\be\.g\.\b/gi, 'for example')
     .replace(/\bi\.e\.\b/gi, 'that is')
@@ -183,6 +214,7 @@ export function prepareSpeechText(raw: string): string {
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/^[ \t]*[•\-\*+]\s+/gm, '') // only bullets at start of line
     .replace(/:\./g, '.')
+    .replace(/\s*[·|]\s*/g, ', ')
     .replace(/\n+/g, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim();
@@ -190,8 +222,8 @@ export function prepareSpeechText(raw: string): string {
   return text;
 }
 
-// 2. Chunking Mechanism: Splits full diagnostic text into complete sentences without breaking decimal numbers
-export function prepareSpeechChunks(rawText: string, maxChunkLen = 320): string[] {
+// 2. Chunking Mechanism: Splits full diagnostic text into multi-sentence prosodic arcs without breaking decimal numbers
+export function prepareSpeechChunks(rawText: string, maxChunkLen = 460): string[] {
   const clean = prepareSpeechText(rawText);
   if (!clean) return [];
 
@@ -267,7 +299,51 @@ async function playAudioBufferViaContext(audioUrl: string): Promise<void> {
 
         const source = audioCtx.createBufferSource();
         source.buffer = decodedBuf;
-        source.connect(audioCtx.destination);
+        source.playbackRate.value = currentPlaybackRate;
+
+        // Envelope GainNode with 14ms micro-fade-in/out to eliminate boundary clicks
+        const envGain = audioCtx.createGain();
+        const now = audioCtx.currentTime;
+        const duration = decodedBuf.duration / currentPlaybackRate;
+        const fadeSec = Math.min(0.014, duration * 0.1);
+
+        envGain.gain.setValueAtTime(0.001, now);
+        envGain.gain.linearRampToValueAtTime(1.0, now + fadeSec);
+        if (duration > fadeSec * 2) {
+          envGain.gain.setValueAtTime(1.0, now + duration - fadeSec);
+          envGain.gain.linearRampToValueAtTime(0.001, now + duration);
+        }
+
+        if (warmthMasterEnabled) {
+          // 1. Warm Chest Low-Shelf (+2.4 dB @ 165 Hz)
+          const lowShelf = audioCtx.createBiquadFilter();
+          lowShelf.type = 'lowshelf';
+          lowShelf.frequency.value = 165;
+          lowShelf.gain.value = 2.4;
+
+          // 2. Natural Presence Articulation (+1.1 dB @ 2850 Hz, Q=1.0)
+          const presence = audioCtx.createBiquadFilter();
+          presence.type = 'peaking';
+          presence.frequency.value = 2850;
+          presence.Q.value = 1.0;
+          presence.gain.value = 1.1;
+
+          // 3. De-Harshing / Anti-Metallic Silk High-Shelf (-2.8 dB @ 6800 Hz)
+          const highShelf = audioCtx.createBiquadFilter();
+          highShelf.type = 'highshelf';
+          highShelf.frequency.value = 6800;
+          highShelf.gain.value = -2.8;
+
+          source.connect(lowShelf);
+          lowShelf.connect(presence);
+          presence.connect(highShelf);
+          highShelf.connect(envGain);
+          envGain.connect(audioCtx.destination);
+        } else {
+          source.connect(envGain);
+          envGain.connect(audioCtx.destination);
+        }
+
         currentSourceNode = source;
 
         source.onended = () => {
@@ -431,10 +507,11 @@ async function processSpeechQueue() {
     }
   }
 
-  // Get or fetch audio for current chunk if server TTS is active
+  // Get or fetch audio for current chunk via Gemini 3.8 Expressive TTS
   let audioUrl = prefetchCache.get(activeQueueIndex) || null;
+  let chunkUsedFallback = false;
 
-  if (!audioUrl && !sessionUsesClientVoice) {
+  if (!audioUrl) {
     try {
       const res = await fetch('/api/text-to-speech-chunk', {
         method: 'POST',
@@ -451,22 +528,25 @@ async function processSpeechQueue() {
       if (res.ok) {
         const data = await res.json();
         if (data.fallbackToClient) {
+          chunkUsedFallback = true;
           sessionUsesClientVoice = true;
         } else if (data.audioUrl) {
           audioUrl = data.audioUrl as string;
           item.audioUrl = audioUrl;
+          sessionUsesClientVoice = false;
           prefetchCache.set(activeQueueIndex, audioUrl);
         }
       } else {
-        sessionUsesClientVoice = true;
+        chunkUsedFallback = true;
       }
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
-      sessionUsesClientVoice = true;
+      chunkUsedFallback = true;
       console.warn('Chunk audio fetch notice:', err?.message || err);
     }
   } else {
     item.audioUrl = audioUrl;
+    sessionUsesClientVoice = false;
   }
 
   if (!isQueueRunning) return;
@@ -480,10 +560,10 @@ async function processSpeechQueue() {
   item.status = 'playing';
   notifyListeners();
 
-  if (audioUrl && !sessionUsesClientVoice) {
+  if (audioUrl && !chunkUsedFallback) {
     await playAudioBufferViaContext(audioUrl);
   } else {
-    // Seamless natural browser speech synthesis
+    // Seamless natural browser speech synthesis for this chunk only
     await speakChunkViaWebSpeech(item.text, currentVoice);
   }
 
@@ -507,13 +587,14 @@ export function startAudioQueue(
 ) {
   stopModelAudio();
 
-  const chunks = prepareSpeechChunks(fullText, 320);
+  const chunks = prepareSpeechChunks(fullText, 460);
   if (!chunks || chunks.length === 0) {
     notifyListeners();
     return;
   }
 
   currentVoice = voice;
+  sessionUsesClientVoice = false; // Always start fresh on Gemini 3.8 Expressive Neural TTS
   activeQueue = chunks.map((chunk, idx) => ({
     id: `chunk-${Date.now()}-${idx}`,
     index: idx,

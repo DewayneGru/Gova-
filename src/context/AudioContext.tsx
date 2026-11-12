@@ -10,6 +10,8 @@ import {
   SpeechQueueItem,
   SpeechQueueState,
   getAudioContext,
+  setStudioWarmthMaster,
+  setSpeechPlaybackRate,
 } from '../lib/audioPlayer';
 
 export interface AudioVoiceContextType {
@@ -17,6 +19,10 @@ export interface AudioVoiceContextType {
   setAutoAudioReadout: (enabled: boolean | ((prev: boolean) => boolean)) => void;
   preferredVoice: 'Kore' | 'Zephyr' | 'Puck' | 'Charon' | 'Fenrir';
   setPreferredVoice: (voice: 'Kore' | 'Zephyr' | 'Puck' | 'Charon' | 'Fenrir') => void;
+  warmthMasterEnabled: boolean;
+  setWarmthMasterEnabled: (enabled: boolean) => void;
+  playbackRate: number;
+  setPlaybackRate: (rate: number) => void;
   isAudioPlaying: boolean;
   isAudioLoading: boolean;
   isAudioPaused: boolean;
@@ -65,6 +71,8 @@ export const AudioVoiceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     currentText: '',
     progressPercent: 0,
     voice: 'Kore',
+    warmthMasterEnabled: true,
+    playbackRate: 1.0,
   });
 
   // Subscribe to AudioQueue streaming engine
@@ -128,6 +136,10 @@ export const AudioVoiceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setAutoAudioReadout,
         preferredVoice,
         setPreferredVoice,
+        warmthMasterEnabled: queueState.warmthMasterEnabled ?? true,
+        setWarmthMasterEnabled: setStudioWarmthMaster,
+        playbackRate: queueState.playbackRate ?? 1.0,
+        setPlaybackRate: setSpeechPlaybackRate,
         isAudioPlaying: queueState.isPlaying,
         isAudioLoading: queueState.isLoading,
         isAudioPaused: queueState.isPaused,

@@ -99,11 +99,22 @@ function computeFileContentSha256(relativeFilePath: string): string {
   return sha256Sync(`fallback-missing-file:${relativeFilePath}`);
 }
 
-// Helper to convert 16-bit PCM (24kHz) to standard playable WAV data URI
-function pcmToWav(pcmBase64: string, sampleRate = 24000, numChannels = 1): string {
-  const pcmBuffer = Buffer.from(pcmBase64, "base64");
+// Helper to ensure 16-bit 24kHz audio is a clean playable WAV data URI without double-wrapping existing RIFF headers
+function pcmToWav(audioBase64: string, sampleRate = 24000, numChannels = 1): string {
+  const rawBuffer = Buffer.from(audioBase64, "base64");
+
+  // Gemini 3.8 unary TTS returns a complete WAV file with a 44-byte RIFF header.
+  // Do NOT prepend a second WAV header if "RIFF" is already present.
+  if (
+    rawBuffer.length >= 44 &&
+    rawBuffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+    rawBuffer.subarray(8, 12).toString("ascii") === "WAVE"
+  ) {
+    return `data:audio/wav;base64,${rawBuffer.toString("base64")}`;
+  }
+
   const wavHeader = Buffer.alloc(44);
-  const dataLen = pcmBuffer.length;
+  const dataLen = rawBuffer.length;
 
   wavHeader.write("RIFF", 0);
   wavHeader.writeUInt32LE(36 + dataLen, 4);
@@ -119,9 +130,29 @@ function pcmToWav(pcmBase64: string, sampleRate = 24000, numChannels = 1): strin
   wavHeader.write("data", 36);
   wavHeader.writeUInt32LE(dataLen, 40);
 
-  const wavBuffer = Buffer.concat([wavHeader, pcmBuffer]);
+  const wavBuffer = Buffer.concat([wavHeader, rawBuffer]);
   return `data:audio/wav;base64,${wavBuffer.toString("base64")}`;
 }
+
+function extractRawPcmFromAudioBase64(audioBase64: string): Buffer {
+  const buf = Buffer.from(audioBase64, "base64");
+  if (
+    buf.length > 44 &&
+    buf.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buf.subarray(8, 12).toString("ascii") === "WAVE"
+  ) {
+    return buf.subarray(44);
+  }
+  return buf;
+}
+
+const VOICE_PERSONA_SPEECH_STYLES: Record<string, string> = {
+  Kore: "Warm, articulate, natural human female voice with relaxed conversational pacing, subtle breath phrasing, and engaging intellectual clarity",
+  Zephyr: "Smooth, expressive, warm scientist persona with fluid natural prosody, gentle emphasis on key insights, and zero robotic stiffness",
+  Puck: "Clear, conversational, friendly systems engineer with natural human rhythm, warm midrange tone, and lively inflection",
+  Charon: "Deep, calm, authoritative broadcast studio host with rich vocal warmth, measured pauses, and natural human cadence",
+  Fenrir: "Resonant, composed, warm baritone thought partner with smooth phrasing and natural conversational flow",
+};
 
 // Lazy GoogleGenAI client initialization
 let genAIClient: GoogleGenAI | null = null;
@@ -2736,6 +2767,16 @@ function formatTextForSpeech(raw: string): string {
     .replace(/(\d+)\s*px/gi, "$1 pixels")
     .replace(/\bLTP\b/g, "Long-Term Potentiation")
     .replace(/\bLTD\b/g, "Long-Term Depression")
+    .replace(/\bDRI\b/g, "Dynamic Range Index")
+    .replace(/\bFTLE\b/g, "Lyapunov exponent")
+    .replace(/\bAER\b/g, "A E R")
+    .replace(/\bw_eff\b/gi, "effective weight")
+    .replace(/\bk_gain\b/gi, "coupling gain")
+    .replace(/\border_parameter_r\b/gi, "Kuramoto order parameter r")
+    .replace(/<=/g, " is less than or equal to ")
+    .replace(/>=/g, " is greater than or equal to ")
+    .replace(/->|→/g, " leads to ")
+    .replace(/\b([a-z]+)_([a-z0-9_]+)\b/gi, (_m, p1, p2) => `${p1} ${p2.replace(/_/g, " ")}`)
     .replace(/\bapprox\b/gi, "approximately")
     .replace(/\be\.g\.\b/gi, "for example")
     .replace(/\bi\.e\.\b/gi, "that is")
@@ -2750,6 +2791,7 @@ function formatTextForSpeech(raw: string): string {
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/^[ \t]*[•\-\*+]\s+/gm, "")
     .replace(/:\./g, ".")
+    .replace(/\s*[·|]\s*/g, ", ")
     .replace(/\n+/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -4918,6 +4960,82 @@ app.post("/api/prepare-speech-chunks", (req, res) => {
   }
 });
 
+// In-memory LRU cache for synthesized TTS chunks so repeated playback is instantaneous
+const ttsChunkCache = new Map<string, string>();
+
+async function synthesizeExpressiveSpeechChunk(
+  ai: GoogleGenAI,
+  textChunk: string,
+  voiceName: string,
+  timeoutMs = 11000
+): Promise<string | null> {
+  const cacheKey = `${voiceName}::${textChunk}`;
+  const cached = ttsChunkCache.get(cacheKey);
+  if (cached) return cached;
+
+  const stylePrompt =
+    VOICE_PERSONA_SPEECH_STYLES[voiceName] || VOICE_PERSONA_SPEECH_STYLES.Kore;
+
+  // Prefer flagship expressive gemini-3.8-flash-tts first, with instant fallback to gemini-3.8-flash-lite-tts
+  const ttsModels = ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"];
+
+  for (const modelName of ttsModels) {
+    try {
+      const generatePromise = ai.models.generateContent({
+        model: modelName,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: textChunk,
+                speechMetadata: {
+                  style: stylePrompt,
+                },
+              } as any,
+            ],
+          },
+        ],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName },
+            },
+          },
+        },
+      });
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`TTS timeout on ${modelName}`)), timeoutMs)
+      );
+
+      const response: any = await Promise.race([generatePromise, timeoutPromise]);
+      const audioBase64 =
+        response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
+
+      if (audioBase64) {
+        if (ttsChunkCache.size > 120) {
+          const oldestKey = ttsChunkCache.keys().next().value;
+          if (oldestKey) ttsChunkCache.delete(oldestKey);
+        }
+        ttsChunkCache.set(cacheKey, audioBase64);
+        return audioBase64;
+      }
+    } catch (err: any) {
+      if (
+        err?.status === 429 ||
+        err?.message?.includes("quota") ||
+        err?.message?.includes("RESOURCE_EXHAUSTED")
+      ) {
+        break;
+      }
+    }
+  }
+
+  return null;
+}
+
 // 6. Individual Chunk Text-to-Speech Endpoint for Streaming AudioContext Queue
 app.post("/api/text-to-speech-chunk", aiRouteRateLimiter, async (req, res) => {
   try {
@@ -4926,51 +5044,13 @@ app.post("/api/text-to-speech-chunk", aiRouteRateLimiter, async (req, res) => {
       return res.status(400).json({ error: "text is required" });
     }
 
-    const cleanChunk = text.replace(/[*#_`~\[\]]/g, "").trim();
+    const cleanChunk = formatTextForSpeech(text);
     if (!cleanChunk) {
       return res.json({ fallbackToClient: true, chunkIndex, totalChunks, speechScript: "" });
     }
 
     const ai = getGenAIClient();
-    let chunkAudioBase64: string | null = null;
-    let lastError: any = null;
-
-    // Up to 2 retries with 4500ms timeout per attempt
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const generatePromise = ai.models.generateContent({
-          model: "gemini-3.8-flash-lite-tts",
-          contents: [{ parts: [{ text: cleanChunk }] }],
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: voice },
-              },
-            },
-          },
-        });
-
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("TTS chunk generation timed out")), 3000)
-        );
-
-        const response: any = await Promise.race([generatePromise, timeoutPromise]);
-
-        chunkAudioBase64 =
-          response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
-        if (chunkAudioBase64) break;
-      } catch (err: any) {
-        lastError = err;
-        // If quota limit or 429, don't wait or retry; immediately hand off to client
-        if (err?.status === 429 || err?.message?.includes("quota") || err?.message?.includes("RESOURCE_EXHAUSTED")) {
-          break;
-        }
-        if (attempt === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 150));
-        }
-      }
-    }
+    const chunkAudioBase64 = await synthesizeExpressiveSpeechChunk(ai, cleanChunk, voice, 11000);
 
     if (chunkAudioBase64) {
       const wavDataUrl = pcmToWav(chunkAudioBase64, 24000, 1);
@@ -4981,16 +5061,16 @@ app.post("/api/text-to-speech-chunk", aiRouteRateLimiter, async (req, res) => {
         chunkIndex,
         totalChunks,
         speechScript: cleanChunk,
+        modelUsed: "gemini-3.8-flash-tts",
       });
     }
 
-    // Graceful fallback for this specific chunk
     return res.json({
       fallbackToClient: true,
       chunkIndex,
       totalChunks,
       speechScript: cleanChunk,
-      reason: lastError?.message || "Chunk TTS unavailable, client voice handoff",
+      reason: "Chunk TTS unavailable, client voice handoff",
     });
   } catch (error: any) {
     console.warn("Chunk TTS notice:", error?.message || "Fallback");
@@ -4998,7 +5078,7 @@ app.post("/api/text-to-speech-chunk", aiRouteRateLimiter, async (req, res) => {
       fallbackToClient: true,
       chunkIndex: req.body?.chunkIndex ?? 0,
       totalChunks: req.body?.totalChunks ?? 1,
-      speechScript: req.body?.text || "",
+      speechScript: formatTextForSpeech(req.body?.text || ""),
       reason: error?.message || "Fallback",
     });
   }
@@ -5017,49 +5097,21 @@ app.post("/api/text-to-speech", aiRouteRateLimiter, async (req, res) => {
       return res.json({ fallbackToClient: true, speechScript: "" });
     }
 
-    const chunksToSynthesize = splitTextIntoSpeechChunks(cleanText, 450);
-
-    // If single chunk, synthesize fast
+    const chunksToSynthesize = splitTextIntoSpeechChunks(cleanText, 460);
     const ai = getGenAIClient();
     const pcmBuffers: Buffer[] = [];
     let hadFailure = false;
 
     for (const chunk of chunksToSynthesize) {
-      let chunkAudioBase64: string | null = null;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const response = await ai.models.generateContent({
-            model: "gemini-3.8-flash-lite-tts",
-            contents: [{ parts: [{ text: chunk }] }],
-            config: {
-              responseModalities: [Modality.AUDIO],
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName: voice },
-                },
-              },
-            },
-          });
-
-          chunkAudioBase64 =
-            response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
-          if (chunkAudioBase64) break;
-        } catch (err: any) {
-          if (attempt === 0) {
-            await new Promise((resolve) => setTimeout(resolve, 250));
-          }
-        }
-      }
-
+      const chunkAudioBase64 = await synthesizeExpressiveSpeechChunk(ai, chunk, voice, 11000);
       if (chunkAudioBase64) {
-        pcmBuffers.push(Buffer.from(chunkAudioBase64, "base64"));
+        pcmBuffers.push(extractRawPcmFromAudioBase64(chunkAudioBase64));
       } else {
         hadFailure = true;
         break;
       }
     }
 
-    // If all chunks were successfully converted to audio PCM
     if (!hadFailure && pcmBuffers.length === chunksToSynthesize.length && pcmBuffers.length > 0) {
       const fullPcmBuffer = Buffer.concat(pcmBuffers);
       const wavDataUrl = pcmToWav(fullPcmBuffer.toString("base64"), 24000, 1);
@@ -5069,11 +5121,10 @@ app.post("/api/text-to-speech", aiRouteRateLimiter, async (req, res) => {
         fallbackToClient: false,
         speechScript: cleanText,
         totalChunks: chunksToSynthesize.length,
+        modelUsed: "gemini-3.8-flash-tts",
       });
     }
 
-    // Gracefully signal client to use native sequential Web Speech Synthesis queue
-    console.warn("Gemini full TTS chunk fallback. Serving seamless client speech synthesis.");
     return res.json({
       fallbackToClient: true,
       speechScript: cleanText,

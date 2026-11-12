@@ -24,6 +24,10 @@ export const AudioStreamingQueueBar: React.FC = () => {
     progressPercent,
     preferredVoice,
     isClientVoice,
+    warmthMasterEnabled,
+    setWarmthMasterEnabled,
+    playbackRate,
+    setPlaybackRate,
     pauseAudio,
     resumeAudio,
     stopAudio,
@@ -52,21 +56,43 @@ export const AudioStreamingQueueBar: React.FC = () => {
               )}
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-xs font-bold text-slate-100 flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-sky-400" />
-                  Neuromorphic Telemetry Audio Stream
+                  Expressive Neural Voice Stream
                 </span>
                 <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">
-                  Voice: {preferredVoice} {isClientVoice ? '(Speech Synthesizer)' : '(Gemini Audio)'}
+                  {preferredVoice} · {isClientVoice ? 'Fallback Synthesizer' : 'Gemini 3.8 Expressive TTS'}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setWarmthMasterEnabled(!warmthMasterEnabled)}
+                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded border transition-colors ${
+                    warmthMasterEnabled
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}
+                  title="Toggle 3-Band Web Audio Studio Vocal Warmth & De-Harshing EQ"
+                >
+                  {warmthMasterEnabled ? 'Studio Warmth EQ: ON' : 'Warmth EQ: OFF'}
+                </button>
+                <select
+                  value={playbackRate}
+                  onChange={(e) => setPlaybackRate(parseFloat(e.target.value))}
+                  className="bg-slate-800 border border-slate-700 text-slate-200 rounded px-1.5 py-0.5 text-[10px] font-mono"
+                  title="Adjust speech cadence speed"
+                >
+                  <option value={0.95}>0.95x Relaxed</option>
+                  <option value={1.0}>1.00x Natural</option>
+                  <option value={1.08}>1.08x Brisk</option>
+                </select>
               </div>
               <p className="text-[11px] text-slate-400 font-mono">
                 {isAudioLoading
-                  ? isClientVoice ? 'Preparing speech...' : 'Synthesizing chunk...'
+                  ? isClientVoice ? 'Preparing speech...' : 'Synthesizing natural prosody arc...'
                   : isAudioPaused
-                  ? `Paused at Sentence ${currentChunkIndex + 1} of ${totalChunks}`
-                  : `Reading Sentence ${currentChunkIndex + 1} of ${totalChunks} (${progressPercent}% read)`}
+                  ? `Paused at Passage ${currentChunkIndex + 1} of ${totalChunks}`
+                  : `Speaking Passage ${currentChunkIndex + 1} of ${totalChunks} (${progressPercent}% complete)`}
               </p>
             </div>
           </div>
