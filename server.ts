@@ -239,18 +239,24 @@ function isTransientModelError(err: any): boolean {
 }
 
 function cleanErrorMessage(err: any): string {
-  if (!err) return "Service notification";
+  if (!err) return "Gemini API request failed";
   const errStr = typeof err === "string" ? err : String(err?.message || err);
+  if (err?.status === 402 || errStr.includes("402") || errStr.includes("prepayment credits are depleted")) {
+    return "Your API key prepayment credits are depleted (HTTP 402). Please select an active API key or update project billing in Settings > Secrets.";
+  }
+  if (err?.status === 403 || errStr.includes("403") || errStr.includes("PERMISSION_DENIED") || errStr.includes("API_KEY_INVALID")) {
+    return "API key permission denied or invalid (HTTP 403). Please check or select your API key in Settings > Secrets.";
+  }
   if (err?.status === 429 || errStr.includes("429") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("quota")) {
-    return "Quota rate-limited (429)";
+    return "Gemini API quota rate-limited (HTTP 429). Please select a billing-enabled API key in Settings > Secrets or wait before retrying.";
   }
   if (err?.status === 404 || errStr.includes("404") || errStr.includes("NOT_FOUND")) {
-    return "Model unavailable (404)";
+    return "Requested Gemini model unavailable (HTTP 404).";
   }
   if (err?.status === 503 || errStr.includes("503") || errStr.includes("UNAVAILABLE") || errStr.includes("High demand")) {
-    return "High demand (503)";
+    return "Gemini model is experiencing high demand (HTTP 503). Please retry in a moment.";
   }
-  return errStr.replace(/\{"error":[\s\S]*?\}/g, "Provider notice").slice(0, 80);
+  return errStr.replace(/\{"error":[\s\S]*?\}/g, "Gemini API error").slice(0, 160);
 }
 
 /**
@@ -516,15 +522,14 @@ app.post("/api/chat", aiRouteRateLimiter, async (req, res) => {
     }
 
     if (!response || !response.text) {
-      console.warn("[Chat] Remote candidates unavailable, activating resilient copilot synthesis");
-      const lastUserMsg = messages.filter((m: any) => m.role === "user").pop()?.content || "";
-      const fallbackText = generateNeurocomputationalFallback(role, String(lastUserMsg), edgeTelemetry);
-      return res.json({
-        text: fallbackText,
-        modelUsed: "gemini-4-argon (Argon Bio-RSI + Spark/3.8 Eval Tier)",
-        reasoningWrapper: buildReasoningWrapperMetadata("chat", "HIGH", PRIMARY_GEMINI_MODEL),
-        roleUsed: role,
-        searchGrounding: null,
+      const errMsg = cleanErrorMessage(lastErr);
+      const statusCode =
+        typeof lastErr?.status === "number" && lastErr.status >= 400 && lastErr.status < 600
+          ? lastErr.status
+          : 502;
+      console.error("[Chat] All Gemini model candidates failed:", errMsg);
+      return res.status(statusCode).json({
+        error: errMsg,
       });
     }
 
@@ -751,6 +756,7 @@ app.post("/api/chat/stream", aiRouteRateLimiter, async (req, res) => {
       });
     };
 
+    let lastStreamErr: any = null;
     for (const candModel of preferredModels) {
       try {
         const streamResp = await ai.models.generateContentStream({
@@ -777,6 +783,7 @@ app.post("/api/chat/stream", aiRouteRateLimiter, async (req, res) => {
           break;
         }
       } catch (err: any) {
+        lastStreamErr = err;
         if (isTransientModelError(err)) markModelQuotaCooled(candModel, 45000);
         console.warn(
           `[ChatStream] Candidate ${candModel} notice: ${cleanErrorMessage(err)}. Trying next...`
@@ -785,21 +792,12 @@ app.post("/api/chat/stream", aiRouteRateLimiter, async (req, res) => {
     }
 
     if (!streamedSuccessfully) {
-      const lastUserMsg = messages.filter((m: any) => m.role === "user").pop()?.content || "";
-      const fallbackText = sanitizeModelAutoOutput(
-        generateNeurocomputationalFallback(role, String(lastUserMsg), edgeTelemetry)
-      );
-      modelUsed = "gemini-4-argon (Argon Bio-RSI + Spark/3.8 Eval Tier)";
-
-      // Stream the synthesized fallback in realistic clause chunks so the Streaming Response Buffer
-      // visually separates incoming chunks from committed clauses
-      const tokens = fallbackText.match(/\S+\s*/g) || [fallbackText];
-      const stepSize = 5;
-      for (let i = 0; i < tokens.length; i += stepSize) {
-        const slice = tokens.slice(i, i + stepSize).join("");
-        processIncomingDelta(slice);
-        await new Promise((r) => setTimeout(r, 38));
-      }
+      const errMsg = cleanErrorMessage(lastStreamErr);
+      console.error("[ChatStream] All Gemini model candidates failed:", errMsg);
+      sendSse("error", {
+        error: errMsg,
+      });
+      return res.end();
     }
 
     // Flush any remaining held buffer if short response < 48 chars
@@ -1038,6 +1036,7 @@ app.post("/api/gova/turn", aiRouteRateLimiter, async (req, res) => {
 
     let response: any = null;
     let modelUsed = preferredModels[0];
+    let lastGovaErr: any = null;
 
     for (const candModel of preferredModels) {
       try {
@@ -1056,16 +1055,21 @@ app.post("/api/gova/turn", aiRouteRateLimiter, async (req, res) => {
           break;
         }
       } catch (err: any) {
+        lastGovaErr = err;
         if (isTransientModelError(err)) markModelQuotaCooled(candModel, 45000);
-        console.warn(`[Gova] Model candidate ${candModel} notice: ${cleanErrorMessage(err)}. Trying resilient fallback...`);
+        console.warn(`[Gova] Model candidate ${candModel} notice: ${cleanErrorMessage(err)}. Trying next candidate...`);
       }
     }
 
-    let responseText = sanitizeModelAutoOutput(response?.text || "");
+    const responseText = sanitizeModelAutoOutput(response?.text || "");
     if (!responseText) {
-      console.warn("[Gova] Remote models unavailable, synthesizing resilient broadcast analysis");
-      responseText = sanitizeModelAutoOutput(generatePersonaResponse("gova_broadcaster", userInput, govaSnapshot));
-      modelUsed = "gemini-4-argon (Argon Bio-RSI Primary)";
+      const errMsg = cleanErrorMessage(lastGovaErr);
+      const statusCode =
+        typeof lastGovaErr?.status === "number" && lastGovaErr.status >= 400 && lastGovaErr.status < 600
+          ? lastGovaErr.status
+          : 502;
+      console.error("[Gova] All Gemini model candidates failed:", errMsg);
+      return res.status(statusCode).json({ error: errMsg });
     }
 
     const audit = auditGovaCadence(responseText);
@@ -2984,6 +2988,82 @@ app.post("/api/bridge/antigravity/approve-write", (req, res) => {
   }
 });
 
+app.get("/api/bridge/antigravity/quota-state", (_req, res) => {
+  try {
+    const quotaFile = path.join(process.cwd(), ".antigravity_quota_state.json");
+    if (fs.existsSync(quotaFile)) {
+      const raw = JSON.parse(fs.readFileSync(quotaFile, "utf-8"));
+      const nowSec = Date.now() / 1000;
+      const pausedUntil = Number(raw.pausedUntilEpoch || 0);
+      const rem = Math.max(0, Math.round(pausedUntil - nowSec));
+      const paused = rem > 0;
+      const h = Math.floor(rem / 3600);
+      const m = Math.floor((rem % 3600) / 60);
+      const s = rem % 60;
+      return res.json({
+        paused,
+        failoverActive: paused || Boolean(raw.failoverActive),
+        pausedUntilEpoch: pausedUntil,
+        remainingSeconds: rem,
+        formattedCountdown: paused ? `${h}h ${m}m ${s}s` : "0h 0m 0s",
+        localFailoverModel: raw.localFailoverModel || "qwen2.5-coder:7b",
+        localFailoverEndpoint: raw.localFailoverEndpoint || "http://127.0.0.1:11434/v1/chat/completions",
+        lastError: raw.lastError || "",
+        updatedAt: raw.updatedAt || nowSec,
+      });
+    }
+    return res.json({
+      paused: false,
+      failoverActive: false,
+      pausedUntilEpoch: 0,
+      remainingSeconds: 0,
+      formattedCountdown: "0h 0m 0s",
+      localFailoverModel: "qwen2.5-coder:7b",
+      localFailoverEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+      lastError: "",
+      updatedAt: Date.now() / 1000,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || "Failed to read quota state" });
+  }
+});
+
+app.post("/api/bridge/antigravity/apply-patch", async (req, res) => {
+  try {
+    const rawContent = String(req.body?.content || "");
+    if (!rawContent.trim()) {
+      return res.status(400).json({ ok: false, error: "Empty request body" });
+    }
+    const { spawnSync } = await import("child_process");
+    const pyRes = spawnSync(
+      "python3",
+      [
+        "-c",
+        "import json, sys; from pathlib import Path; from scripts.antigravity_sync_daemon import validate_and_apply_patch; print(json.dumps(validate_and_apply_patch(sys.stdin.read(), Path.cwd())))",
+      ],
+      {
+        cwd: process.cwd(),
+        input: rawContent,
+        encoding: "utf-8",
+        timeout: 15000,
+      }
+    );
+    if (pyRes.status === 0 && pyRes.stdout) {
+      const parsed = JSON.parse(pyRes.stdout.trim());
+      return res.status(parsed.ok ? 200 : 422).json(parsed);
+    }
+    return res.status(422).json({
+      ok: false,
+      error: (pyRes.stderr || "Patch validation failed").trim(),
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || "Failed to execute apply-patch",
+    });
+  }
+});
+
 app.post("/api/bridge/antigravity/dispatch", aiRouteRateLimiter, async (req, res) => {
   try {
     const {
@@ -3001,7 +3081,7 @@ app.post("/api/bridge/antigravity/dispatch", aiRouteRateLimiter, async (req, res
     const tier: ModelTier =
       modelTier === "tier1-flash" ? "tier1-flash" : "tier2-argon";
     const resolvedModel =
-      tier === "tier2-argon" ? "gemini-4-argon" : "gemini-4-hydrogen";
+      tier === "tier2-argon" ? PRIMARY_GEMINI_MODEL : PRO_REASONING_WRAPPER_MODEL;
     const dispatchCandidates =
       tier === "tier2-argon"
         ? getOrderedModelCandidates("complex")
@@ -3022,15 +3102,18 @@ app.post("/api/bridge/antigravity/dispatch", aiRouteRateLimiter, async (req, res
 
     let responseText = "";
     let actualModelUsed = resolvedModel;
+    let lastDispatchErr: any = null;
+
+    const systemInstruction =
+      "You are Gova operating over the Antigravity Unified Bridge (baseline commit f86b5c0). " +
+      "CRITICAL CADENCE RULES: " +
+      "1. NEVER start with reflexive affirmations ('Certainly!', 'Absolutely!', 'Of course!', 'Sure!', 'Great question!'). " +
+      "2. Sentence 1 MUST state the core technical thesis directly. " +
+      "3. Reference canonical fs.realpathSync path resolution, UID-bound writeGate enforcement, CSR/CSC sparse matrix bijection across 16 neurons and 39 synapses, and 3-tier telemetry provenance ('Code-Default', 'Simulated-Run', 'Physical-Capture' using 1000.0 / clock_hz). Keep your response concise (2-4 high-density technical sentences). " +
+      "4. When returning code changes, output a single valid unified git diff inside a ```diff fenced block with a/ and b/ repo-relative paths and no abbreviated // ... existing code ... placeholders.";
+
     try {
       const ai = getGenAIClient();
-      const systemInstruction =
-        "You are Gova operating over the Antigravity Unified Bridge (baseline commit f86b5c0). " +
-        "CRITICAL CADENCE RULES: " +
-        "1. NEVER start with reflexive affirmations ('Certainly!', 'Absolutely!', 'Of course!', 'Sure!', 'Great question!'). " +
-        "2. Sentence 1 MUST state the core technical thesis directly. " +
-        "3. Reference canonical fs.realpathSync path resolution, UID-bound writeGate enforcement, CSR/CSC sparse matrix bijection across 16 neurons and 39 synapses, and 3-tier telemetry provenance ('Code-Default', 'Simulated-Run', 'Physical-Capture' using 1000.0 / clock_hz). Keep your response concise (2-4 high-density technical sentences).";
-
       for (const candModel of dispatchCandidates) {
         try {
           const genResp = await ai.models.generateContent({
@@ -3063,18 +3146,53 @@ app.post("/api/bridge/antigravity/dispatch", aiRouteRateLimiter, async (req, res
             break;
           }
         } catch (innerErr: any) {
+          lastDispatchErr = innerErr;
           if (isTransientModelError(innerErr)) markModelQuotaCooled(candModel, 45000);
         }
       }
-      if (!responseText) {
-        throw new Error("All candidate models unavailable");
+    } catch (outerErr: any) {
+      lastDispatchErr = outerErr;
+    }
+
+    // Attempt local Qwen 2.5 failover if upstream Gemini failed
+    if (!responseText) {
+      try {
+        const qwenRes = await fetch("http://127.0.0.1:11434/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "qwen2.5-coder:7b",
+            messages: [
+              { role: "system", content: systemInstruction },
+              { role: "user", content: cleanPrompt },
+            ],
+            temperature: 0.2,
+          }),
+        });
+        if (qwenRes.ok) {
+          const qwenData: any = await qwenRes.json();
+          const qwenText = qwenData?.choices?.[0]?.message?.content || "";
+          if (qwenText) {
+            responseText = sanitizeModelAutoOutput(qwenText);
+            actualModelUsed = "qwen2.5-coder:7b (Local Failover)";
+          }
+        }
+      } catch {
+        // Local Qwen daemon not running
       }
-    } catch {
-      // Deterministic f86b5c0 architectural synthesis fallback if offline/rate-limited
-      responseText =
-        tier === "tier2-argon"
-          ? `Argon structural evaluation complete against f86b5c0 invariants (Sigma=${activeTelemetry.sigma}, r=${activeTelemetry.orderParameterR}, Provenance=${activeTelemetry.provenanceTier}): target paths are canonicalized via fs.realpathSync, CSR/CSC index bijection is verified across all 39 synapses, and any mutation remains staged in shadowRefactoring.ts until UID ${ownerUid} explicitly authorizes writeGate.ts.`
-          : `Flash bridge sync verified (${activeTelemetry.provenanceTier}): governor phase coherence r=${activeTelemetry.orderParameterR} and DRI=${activeTelemetry.dri} remain within nominal bounds while all Tier-2 protected files are locked behind fs.realpathSync.`;
+    }
+
+    if (!responseText) {
+      const errMsg = cleanErrorMessage(lastDispatchErr);
+      const statusCode =
+        typeof lastDispatchErr?.status === "number" &&
+        lastDispatchErr.status >= 400 &&
+        lastDispatchErr.status < 600
+          ? lastDispatchErr.status
+          : 502;
+      return res.status(statusCode).json({
+        error: errMsg,
+      });
     }
 
     const peeled = stripLeadingReflexiveAffirmation(responseText);

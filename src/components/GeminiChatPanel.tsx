@@ -862,17 +862,33 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
       if (err?.name === 'AbortError') {
         return;
       }
-      console.warn('Chat stream notice, falling back to /api/chat:', err?.message || err);
+      const streamErrMsg = String(err?.message || '');
+      if (
+        streamErrMsg.includes('402') ||
+        streamErrMsg.includes('403') ||
+        streamErrMsg.includes('429') ||
+        streamErrMsg.includes('prepayment credits') ||
+        streamErrMsg.includes('Settings > Secrets')
+      ) {
+        setErrorMsg(streamErrMsg);
+        setStreamBuffer((prev) => ({
+          ...prev,
+          isStreaming: false,
+          gateStatus: 'IDLE',
+        }));
+        return;
+      }
+      console.warn('Chat stream notice, falling back to /api/chat:', streamErrMsg);
       try {
         const fallbackResp = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
         });
+        const data = await fallbackResp.json().catch(() => ({}));
         if (!fallbackResp.ok) {
-          throw new Error(`HTTP ${fallbackResp.status}`);
+          throw new Error(data.error || streamErrMsg || `HTTP ${fallbackResp.status}`);
         }
-        const data = await fallbackResp.json();
         const assistantMsg: ChatMessage = {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
@@ -893,7 +909,7 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
           fullBufferedText: data.text,
         }));
       } catch (innerErr: any) {
-        let displayError = innerErr?.message || 'Error communicating with neuromorphic model';
+        let displayError = innerErr?.message || streamErrMsg || 'Error communicating with neuromorphic model';
         if (
           displayError.includes('503') ||
           displayError.includes('high demand') ||

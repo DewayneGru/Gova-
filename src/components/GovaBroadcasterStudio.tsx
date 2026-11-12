@@ -68,6 +68,7 @@ export const GovaBroadcasterStudio: React.FC = () => {
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [copiedScript, setCopiedScript] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [turnError, setTurnError] = useState<string | null>(null);
   const [pythonScript, setPythonScript] = useState<string>('');
 
   // Telemetry Turns
@@ -135,6 +136,7 @@ export const GovaBroadcasterStudio: React.FC = () => {
     if (!text || isGenerating) return;
 
     setIsGenerating(true);
+    setTurnError(null);
     try {
       const res = await fetch('/api/gova/turn', {
         method: 'POST',
@@ -145,28 +147,29 @@ export const GovaBroadcasterStudio: React.FC = () => {
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.turn) {
-          setTurns((prev) => [data.turn, ...prev]);
-          if (data.stats) setStats(data.stats);
-          setUserInput('');
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.turn) {
+        setTurns((prev) => [data.turn, ...prev]);
+        if (data.stats) setStats(data.stats);
+        setUserInput('');
 
-          // Mark checklist
-          setChecklist((prev) => ({
-            ...prev,
-            stressTestRun: true,
-            turnTelemetryCaptured: true,
-          }));
+        // Mark checklist
+        setChecklist((prev) => ({
+          ...prev,
+          stressTestRun: true,
+          turnTelemetryCaptured: true,
+        }));
 
-          // Intentional broadcaster playback after deliberate delay
-          setTimeout(() => {
-            speakModelOutput(data.turn.assistantOutput, 'Charon');
-          }, intentionalDelayMs);
-        }
+        // Intentional broadcaster playback after deliberate delay
+        setTimeout(() => {
+          speakModelOutput(data.turn.assistantOutput, 'Charon');
+        }, intentionalDelayMs);
+      } else {
+        setTurnError(data.error || `Broadcast turn failed (HTTP ${res.status})`);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to trigger Gova broadcast turn:', e);
+      setTurnError(e?.message || 'Failed to trigger Gova broadcast turn.');
     } finally {
       setIsGenerating(false);
     }
@@ -428,6 +431,17 @@ export const GovaBroadcasterStudio: React.FC = () => {
                     <span>{isGenerating ? 'Synthesizing Broadcast...' : 'Execute Turn'}</span>
                   </button>
                 </div>
+                {turnError && (
+                  <div className="mt-1 px-3 py-2 rounded-lg bg-rose-950/60 border border-rose-500/40 text-rose-200 text-xs flex items-center justify-between gap-2">
+                    <span>{turnError}</span>
+                    <button
+                      onClick={() => setTurnError(null)}
+                      className="text-[10px] font-mono text-rose-300 hover:text-white underline shrink-0"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

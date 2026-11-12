@@ -7,14 +7,14 @@
  * `gemini-3.1-flash-lite` to low-latency evaluations, reviews, and resilient fallback.
  */
 
-export const PRIMARY_GEMINI_MODEL = 'gemini-4-argon';
+export const PRIMARY_GEMINI_MODEL = 'gemini-4-hydrogen';
 export const PRO_REASONING_WRAPPER_MODEL = 'gemini-4-hydrogen';
-export const ARGON_VOLECE_MODEL = 'gemini-4-argon';
+export const ARGON_VOLECE_MODEL = 'gemini-4-hydrogen';
 export const GEMINI_SPARK_WRAPPER_MODEL = 'gemini-spark-orchestrator';
 export const REVIEWER_FLASH_MODEL = 'gemini-4-hydrogen';
 export const FALLBACK_FLASH_LITE_MODEL = 'gemini-3.1-flash-lite';
-export const ARGON_BUILDER_MODEL = 'gemini-4-argon';
-export const WATCHDOG_ARGON_MODEL = 'gemini-4-argon';
+export const ARGON_BUILDER_MODEL = 'gemini-4-hydrogen';
+export const WATCHDOG_ARGON_MODEL = 'gemini-4-hydrogen';
 
 export type ReasoningWrapperDomain =
   | 'chat'
@@ -214,6 +214,7 @@ export function wrapSystemInstructionWith31ProSkills(
 
   return `[PRIMARY MODEL IDENTITY: GEMINI 4 ARGON (models/gemini-4-argon) — BIOLOGICALLY-RESTRUCTURED NEUROMORPHIC & RECURSIVE SELF-IMPROVEMENT ENGINE]
 Identity & Parsing Directive: You are Gemini 4 Argon (models/gemini-4-argon), the primary frontier neuromorphic intelligence and final SNN structural set builder with Argon Volece audio/telemetry synthesis. Always operate at full Gemini 4 Argon analytical depth and output clean, well-formed Markdown and JSON structures.
+When returning code changes, output a single valid unified git diff inside a \`\`\`diff fenced block with a/ and b/ repo-relative paths and no abbreviated // ... existing code ... placeholders.
 
 [ARGON VOLECE & SPARK EVALUATION & BENCHMARK VERIFICATION LAYER]
 ${sparkDomainDirectives[domain]}

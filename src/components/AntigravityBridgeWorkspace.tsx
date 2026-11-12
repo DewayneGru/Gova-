@@ -60,6 +60,96 @@ export interface BridgeChatMessage {
   timestamp: string;
 }
 
+export interface QuotaPauseState {
+  paused: boolean;
+  failoverActive: boolean;
+  pausedUntilEpoch: number;
+  remainingSeconds: number;
+  formattedCountdown: string;
+  localFailoverModel: string;
+  localFailoverEndpoint: string;
+  lastError: string;
+}
+
+export function useQuotaPauseState() {
+  const [quotaState, setQuotaState] = useState<QuotaPauseState>({
+    paused: false,
+    failoverActive: false,
+    pausedUntilEpoch: 0,
+    remainingSeconds: 0,
+    formattedCountdown: "0h 0m 0s",
+    localFailoverModel: "qwen2.5-coder:7b",
+    localFailoverEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+    lastError: "",
+  });
+
+  const refreshQuotaState = async () => {
+    try {
+      const localRes = await fetch("http://127.0.0.1:8765/quota-state");
+      if (localRes.ok) {
+        const data = await localRes.json();
+        setQuotaState((prev) => ({ ...prev, ...data }));
+        return;
+      }
+    } catch {
+      // Local daemon not reachable from browser; fall back to backend endpoint
+    }
+    try {
+      const fallbackRes = await fetch("/api/bridge/antigravity/quota-state");
+      if (fallbackRes.ok) {
+        const data = await fallbackRes.json();
+        setQuotaState((prev) => ({ ...prev, ...data }));
+      }
+    } catch {
+      // Ignore if offline
+    }
+  };
+
+  useEffect(() => {
+    refreshQuotaState();
+  }, []);
+
+  return { quotaState, refreshQuotaState };
+}
+
+export const QuotaStatusBanner: React.FC<{
+  quotaState: QuotaPauseState;
+  onRefresh: () => void;
+}> = ({ quotaState, onRefresh }) => {
+  return (
+    <div
+      className={`px-4 py-2 border-b flex flex-wrap items-center justify-between gap-2 text-xs font-mono ${
+        quotaState.paused || quotaState.failoverActive
+          ? "bg-amber-950/60 border-amber-500/40 text-amber-200"
+          : "bg-slate-900/80 border-slate-800 text-slate-300"
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className={`w-2 h-2 rounded-full ${
+            quotaState.paused || quotaState.failoverActive
+              ? "bg-amber-400 animate-pulse"
+              : "bg-emerald-400"
+          }`}
+        />
+        <span>
+          {quotaState.paused || quotaState.failoverActive
+            ? `Quota Circuit-Breaker Active (Resets in ${quotaState.formattedCountdown}) • Failover: ${quotaState.localFailoverModel}`
+            : `Sync Daemon Ready (127.0.0.1:8765) • Local Failover Standby: ${quotaState.localFailoverModel}`}
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={onRefresh}
+        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] flex items-center gap-1"
+      >
+        <RefreshCw className="w-3 h-3" />
+        <span>Check Quota State</span>
+      </button>
+    </div>
+  );
+};
+
 const INITIAL_PROPOSALS: RefactorProposal[] = [
   {
     id: "ag-9f31a2c401",
@@ -145,6 +235,10 @@ export const AntigravityBridgeWorkspace: React.FC = () => {
     `--- a/src/snn_core.hpp\n+++ b/src/snn_core.hpp\n@@ -88,3 +88,4 @@\n-  v_thresh[i] -= 0.01f;\n+  v_thresh[i] = std::max(v_rest + 2.0f, v_thresh[i] - 0.008f);`
   );
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
+  const [aiStudioPatchInput, setAiStudioPatchInput] = useState<string>("");
+  const [isApplyingPatch, setIsApplyingPatch] = useState<boolean>(false);
+  const [lastPatchStat, setLastPatchStat] = useState<string | null>(null);
+  const { quotaState, refreshQuotaState } = useQuotaPauseState();
 
   const [chatHistory, setChatHistory] = useState<BridgeChatMessage[]>([
     {
@@ -327,28 +421,67 @@ export const AntigravityBridgeWorkspace: React.FC = () => {
           ownerUid: activeUid,
         }),
       });
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
       if (resp.ok && data.turn) {
         setChatHistory((prev) => [...prev, data.turn]);
-        setIsDispatching(false);
-        return;
+      } else {
+        setStatusBanner(data.error || `Dispatch failed (HTTP ${resp.status})`);
       }
-    } catch {
-      // Fallback if offline
+    } catch (err: any) {
+      setStatusBanner(err?.message || "Failed to reach Antigravity dispatch endpoint.");
+    } finally {
+      setIsDispatching(false);
     }
+  };
 
-    const fallbackResponse: BridgeChatMessage = {
-      id: `msg-${Date.now() + 1}`,
-      role: "antigravity",
-      modelTier: selectedModelTier,
-      content:
-        selectedModelTier === "tier2-argon"
-          ? `Argon structural evaluation complete against f86b5c0 invariants (Sigma=${telemetry.sigma}, r=${telemetry.orderParameterR}): target paths are canonicalized via fs.realpathSync, and any mutation remains staged in shadowRefactoring.ts until UID ${activeUid} explicitly authorizes writeGate.ts.`
-          : `Flash context sync acknowledged (${telemetry.provenanceTier}): governor phase coherence r=${telemetry.orderParameterR} and DRI=${telemetry.dri} remain within nominal bounds.`,
-      timestamp: new Date().toISOString().slice(11, 19) + " UTC",
-    };
-    setChatHistory((prev) => [...prev, fallbackResponse]);
-    setIsDispatching(false);
+  const handleApplyAiStudioPatch = async (aiStudioMarkdown: string) => {
+    try {
+      const res = await fetch("http://127.0.0.1:8765/apply-patch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: aiStudioMarkdown }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        throw new Error(data.error || "Failed to apply AI Studio patch");
+      }
+      return data.stat;
+    } catch (localErr: any) {
+      const msg = String(localErr?.message || "");
+      if (
+        msg &&
+        !msg.includes("Failed to fetch") &&
+        !msg.includes("NetworkError") &&
+        !msg.includes("Load failed")
+      ) {
+        throw localErr;
+      }
+      const fallbackRes = await fetch("/api/bridge/antigravity/apply-patch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: aiStudioMarkdown }),
+      });
+      const fallbackData = await fallbackRes.json();
+      if (!fallbackData.ok) {
+        throw new Error(fallbackData.error || "Failed to apply AI Studio patch");
+      }
+      return fallbackData.stat;
+    }
+  };
+
+  const handleTriggerApplyPatch = async (rawContent: string) => {
+    if (!rawContent.trim() || isApplyingPatch) return;
+    setIsApplyingPatch(true);
+    setLastPatchStat(null);
+    try {
+      const stat = await handleApplyAiStudioPatch(rawContent);
+      setLastPatchStat(stat || "Patch applied cleanly (git apply --check verified).");
+      setStatusBanner(`Applied unified diff via /apply-patch: ${stat || "OK"}`);
+    } catch (err: any) {
+      setStatusBanner(`Patch rejected by /apply-patch: ${err?.message || err}`);
+    } finally {
+      setIsApplyingPatch(false);
+    }
   };
 
   const handleStageCustomPatch = async (e: React.FormEvent) => {
@@ -596,10 +729,15 @@ export const AntigravityBridgeWorkspace: React.FC = () => {
               <span className="text-xs font-mono text-slate-400">
                 Active Route:{" "}
                 {selectedModelTier === "tier2-argon"
-                  ? "gemini-4-argon"
-                  : "gemini-4-hydrogen"}
+                  ? "gemini-4-hydrogen (Deep Gate)"
+                  : "gemini-4-hydrogen (Fast Sync)"}
               </span>
             </header>
+
+            <QuotaStatusBanner
+              quotaState={quotaState}
+              onRefresh={refreshQuotaState}
+            />
 
             {statusBanner && (
               <div className="px-5 py-2 bg-indigo-950/60 border-b border-indigo-500/30 flex items-center justify-between text-xs text-indigo-200">
@@ -954,6 +1092,53 @@ export const AntigravityBridgeWorkspace: React.FC = () => {
                       );
                     })}
                   </pre>
+                </div>
+              </div>
+
+              {/* AI Studio Unified Diff Receiver (POST /apply-patch) */}
+              <div className="p-4 rounded-xl border border-indigo-500/30 bg-slate-900/70 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                      <FileCode2 className="w-4 h-4 text-indigo-400" />
+                      <span>AI Studio Auto-Patch Receiver (POST /apply-patch)</span>
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400">
+                      Strips ```diff fences, guards PROTECTED_PATHS, and runs git apply --check --recount
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isApplyingPatch}
+                    onClick={() => handleTriggerApplyPatch(selectedProposal.unifiedDiff)}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-mono font-semibold transition"
+                  >
+                    {isApplyingPatch ? "Checking..." : "Apply Selected Proposal Diff"}
+                  </button>
+                </div>
+
+                <textarea
+                  rows={4}
+                  value={aiStudioPatchInput}
+                  onChange={(e) => setAiStudioPatchInput(e.target.value)}
+                  placeholder={"Paste raw AI Studio response or ```diff block (--- a/file, +++ b/file) to verify with git apply --check and apply to working tree..."}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-mono text-slate-400">
+                    {lastPatchStat
+                      ? `git diff --stat: ${lastPatchStat}`
+                      : "Endpoint: http://127.0.0.1:8765/apply-patch"}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={!aiStudioPatchInput.trim() || isApplyingPatch}
+                    onClick={() => handleTriggerApplyPatch(aiStudioPatchInput)}
+                    className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-mono font-semibold transition"
+                  >
+                    {isApplyingPatch ? "Running git apply --check..." : "Verify & Apply Patch"}
+                  </button>
                 </div>
               </div>
 
