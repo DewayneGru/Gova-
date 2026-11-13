@@ -178,21 +178,6 @@ export const HeaderTelemetry: React.FC<HeaderTelemetryProps> = ({
     }
   };
 
-  // Load initial model diagnostic report from server cache
-  useEffect(() => {
-    fetch('/api/last-diagnostic')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && data.analysisText && !aiReport) {
-          setAiReport(data.analysisText);
-          if (data.applied) {
-            setOperatorApproved(true);
-          }
-        }
-      })
-      .catch(() => {});
-  }, []);
-
   const parsedTuning = aiReport ? parseRecommendationsFromReport(aiReport) : {};
 
   const handleApproveAndApply = () => {
@@ -239,166 +224,100 @@ export const HeaderTelemetry: React.FC<HeaderTelemetryProps> = ({
   };
 
   return (
-    <header className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40 px-4 py-3 shadow-md">
-      <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-        {/* Brand & Mode */}
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-sky-500/20">
-            <Cpu className="w-5 h-5 animate-pulse" />
+    <header className="bg-[#0B0E17]/95 backdrop-blur-md border-b border-slate-800/90 sticky top-0 z-40 px-4 py-2.5">
+      <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+        {/* Zone 1: Brand Wordmark & Instrument Status */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-700/80 flex items-center justify-center text-sky-400">
+            <Cpu className="w-4 h-4" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-bold text-slate-100 tracking-tight">
-                SynapseEdge
-              </h1>
-              <span className="text-[10px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded font-semibold">
-                Bio-SNN Edge v2.4
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Low-Latency Synaptic Plasticity & Embedded Spiking Simulator
-            </p>
+          <div className="flex items-baseline gap-2.5">
+            <h1 className="text-base font-bold text-slate-100 tracking-tight whitespace-nowrap">
+              SynapseEdge
+            </h1>
+            <span className="text-xs text-slate-400 hidden sm:inline whitespace-nowrap">
+              Neuromorphic SNN Workbench
+            </span>
           </div>
         </div>
 
-        {/* Real-time Edge Hardware Telemetry KPIs */}
-        <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
-          <div className="bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-2">
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
-            <div>
-              <div className="text-[10px] text-slate-500 uppercase">Power Draw</div>
-              <div className="text-amber-300 font-bold">{telemetry.powerMw.toFixed(2)} mW</div>
-            </div>
+        {/* Zone 2: Calibrated Hardware Telemetry Strip (Tabular Monospace, Hairline Dividers) */}
+        <div className="flex flex-wrap items-center divide-x divide-slate-800 bg-[#07090E] border border-slate-800/90 rounded-lg px-1 py-1 text-xs font-mono tabular-nums">
+          <div className="px-3 py-0.5 flex items-center gap-2">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Power</span>
+            <span className="text-amber-300 font-semibold">{telemetry.powerMw.toFixed(2)} mW</span>
           </div>
 
-          <div className="bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-2">
-            <Gauge className="w-3.5 h-3.5 text-emerald-400" />
-            <div>
-              <div className="text-[10px] text-slate-500 uppercase">Energy / SOP</div>
-              <div className="text-emerald-300 font-bold">{telemetry.energyPerSopPj} pJ</div>
-            </div>
+          <div className="px-3 py-0.5 flex items-center gap-2">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Energy</span>
+            <span className="text-emerald-300 font-semibold">{telemetry.energyPerSopPj} pJ/SOP</span>
           </div>
 
-          <div className="bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-2">
-            <Clock className="w-3.5 h-3.5 text-sky-400" />
-            <div>
-              <div className="text-[10px] text-slate-500 uppercase">AER Latency</div>
-              <div className="text-sky-300 font-bold">{telemetry.aerLatencyMs.toFixed(2)} ms</div>
-            </div>
+          <div className="px-3 py-0.5 flex items-center gap-2">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">AER Bus</span>
+            <span className="text-sky-300 font-semibold">{telemetry.aerLatencyMs.toFixed(2)} ms</span>
           </div>
 
-          <div className="bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-2">
-            <Activity className="w-3.5 h-3.5 text-purple-400" />
-            <div>
-              <div className="text-[10px] text-slate-500 uppercase">Mean Firing</div>
-              <div className="text-purple-300 font-bold">{telemetry.meanFiringRateHz} Hz</div>
-            </div>
+          <div className="px-3 py-0.5 flex items-center gap-2">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Firing</span>
+            <span className="text-slate-200 font-semibold">{telemetry.meanFiringRateHz} Hz</span>
           </div>
 
-          <div className="bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-2">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <div>
-              <div className="text-[10px] text-slate-500 uppercase">Spike Events</div>
-              <div className="text-emerald-300 font-bold">
-                {telemetry.totalSpikesEmitted?.toLocaleString() || 0} spikes
-              </div>
-            </div>
+          <div className="px-3 py-0.5 hidden lg:flex items-center gap-2.5">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">DRI</span>
+            <span
+              className={`font-semibold ${
+                currentDri < 0.25
+                  ? 'text-emerald-400'
+                  : currentDri < 0.35
+                  ? 'text-amber-400'
+                  : 'text-rose-400'
+              }`}
+            >
+              {(currentDri * 100).toFixed(0)}%
+            </span>
+            <DRISparkline
+              history={driHistory}
+              currentVal={currentDri}
+              threshold={0.35}
+              width={72}
+              height={20}
+              showTrendBadge={false}
+            />
           </div>
+        </div>
 
-          {telemetry.substrateKeel && (
-            <div className="bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${
-                telemetry.traumaState === 'ventral_equilibrium' ? 'bg-emerald-400 animate-pulse' : 'bg-purple-400 animate-ping'
-              }`} />
-              <div>
-                <div className="text-[10px] text-slate-500 uppercase">Keel Valence / Gate</div>
-                <div className="text-cyan-300 font-bold">
-                  {telemetry.substrateKeel.valence > 0 ? `+${telemetry.substrateKeel.valence.toFixed(2)}` : telemetry.substrateKeel.valence.toFixed(2)}
-                  <span className="text-[10px] text-slate-400 ml-1 font-normal font-sans">
-                    ({telemetry.constitutionalGateState === 'NOMINAL' ? 'Nominal' : telemetry.constitutionalGateState?.replace('CONSTITUTIONAL_', '')})
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Autonomous Self-Improvement (RSI) Anti-Divergence Badge & 60s DRI Sparkline */}
-          <div className="bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-              <div>
-                <div className="text-[10px] text-slate-500 uppercase flex items-center gap-1">
-                  <span>RSI Anti-Divergence</span>
-                  {rsiActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
-                </div>
-                <div className="text-emerald-300 font-bold flex items-center gap-1 text-xs">
-                  <span>{rsiActive ? 'ACTIVE' : 'STANDBY'}</span>
-                  {typeof divergenceRiskIndex === 'number' && (
-                    <span className={`text-[10px] font-mono font-normal ml-0.5 ${
-                      divergenceRiskIndex < 0.25 ? 'text-emerald-400' : divergenceRiskIndex < 0.35 ? 'text-amber-400' : 'text-rose-400'
-                    }`}>
-                      ({(divergenceRiskIndex * 100).toFixed(0)}%)
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Mini-Sparkline Component: Last 60 seconds of Divergence Risk Index (DRI) */}
-            <div className="pl-2.5 border-l border-slate-800/80 flex items-center">
-              <DRISparkline
-                history={driHistory}
-                currentVal={currentDri}
-                threshold={0.35}
-                width={112}
-                height={26}
-                showTrendBadge={true}
-              />
-            </div>
-          </div>
-
-          {/* Unified 5-Subsystem Health & Buffer Badge */}
-          <div className="bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-2">
-            <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-            <div>
-              <div className="text-[10px] text-slate-500 uppercase flex items-center gap-1">
-                <span>5-Subsystem Health</span>
-              </div>
-              <div className="text-emerald-300 font-bold flex items-center gap-1 text-xs">
-                <span>SUBSCRIBED (30 FPS)</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Automatic Audio Readout Toggle & Voice Selector */}
-          <div className="bg-slate-950/80 border border-slate-800 px-2.5 py-1.5 rounded-lg flex items-center gap-2">
+        {/* Zone 3: Primary Action & Audio / Account Controls */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="hidden sm:flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2 py-1 rounded-lg">
             <button
               onClick={() => {
                 if (isAudioPlaying) stopAudio();
                 setAutoAudioReadout((prev: boolean) => !prev);
               }}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium transition-all ${
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors whitespace-nowrap ${
                 autoAudioReadout
                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                  : 'bg-slate-800/80 text-slate-400 border border-slate-700 hover:text-slate-200'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
-              title={autoAudioReadout ? 'Auto Audio Readout Active: model outputs will speak automatically' : 'Auto Audio Readout Off'}
+              title={
+                autoAudioReadout
+                  ? 'Auto Audio Readout Active: model outputs speak automatically'
+                  : 'Toggle automatic voice readout'
+              }
             >
               {autoAudioReadout ? (
                 <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
               ) : (
                 <VolumeX className="w-3.5 h-3.5 text-slate-400" />
               )}
-              <span className="whitespace-nowrap">
-                {autoAudioReadout ? 'Auto Audio: ON' : 'Auto Audio: OFF'}
-              </span>
+              <span>{autoAudioReadout ? 'Voice ON' : 'Voice OFF'}</span>
             </button>
 
             {isAudioPlaying && (
               <button
                 onClick={stopAudio}
-                className="px-1.5 py-1 bg-rose-500/20 text-rose-300 border border-rose-500/40 rounded text-[10px] hover:bg-rose-500/30 transition-all font-mono"
-                title="Stop active audio readout"
+                className="px-1.5 py-0.5 bg-rose-500/20 text-rose-300 border border-rose-500/40 rounded text-[10px] hover:bg-rose-500/30 font-mono"
               >
                 Stop
               </button>
@@ -407,39 +326,35 @@ export const HeaderTelemetry: React.FC<HeaderTelemetryProps> = ({
             <select
               value={preferredVoice}
               onChange={(e: any) => setPreferredVoice(e.target.value)}
-              className="bg-slate-900 border border-slate-700 text-slate-200 text-[10px] rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              className="bg-slate-950 border border-slate-800 text-slate-300 text-[11px] rounded px-1.5 py-0.5 focus:outline-none focus:border-sky-500"
               title="Select TTS Voice"
             >
-              <option value="Kore">Kore (Balanced)</option>
-              <option value="Zephyr">Zephyr (Researcher)</option>
-              <option value="Puck">Puck (Energetic)</option>
-              <option value="Charon">Charon (Deep)</option>
-              <option value="Fenrir">Fenrir (Authoritative)</option>
+              <option value="Kore">Kore</option>
+              <option value="Zephyr">Zephyr</option>
+              <option value="Charon">Charon</option>
+              <option value="Puck">Puck</option>
+              <option value="Fenrir">Fenrir</option>
             </select>
           </div>
 
           <button
             onClick={handleSynthesizeTelemetry}
             disabled={isSynthesizing}
-            className="px-3 py-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-lg text-xs font-medium transition-all shadow flex items-center gap-1.5 shrink-0"
+            className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
           >
             {isSynthesizing ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <Sparkles className="w-3.5 h-3.5" />
             )}
-            <span>AI Telemetry Audit</span>
+            <span>Telemetry Audit</span>
           </button>
 
-          {/* Google Sign-In Account Control */}
           {user && !needsDriveAuth ? (
-            <div className="bg-slate-950/80 border border-slate-800 px-2.5 py-1.5 rounded-lg flex items-center gap-2 shrink-0">
+            <div className="bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg flex items-center gap-2 shrink-0">
               <UserIcon className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-[11px] text-slate-300 max-w-[120px] truncate" title={user.email || 'Signed in'}>
+              <span className="text-[11px] text-slate-300 max-w-[110px] truncate" title={user.email || 'Signed in'}>
                 {user.displayName || user.email}
-              </span>
-              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                Drive Ready
               </span>
               <button
                 onClick={signOutUser}
@@ -453,19 +368,11 @@ export const HeaderTelemetry: React.FC<HeaderTelemetryProps> = ({
           ) : (
             <button
               onClick={signInWithGoogle}
-              className="gsi-material-button px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-lg text-xs font-medium transition-all flex items-center gap-2 shrink-0 shadow-sm cursor-pointer"
-              title="Sign in with Google to access Google Drive and save SNN profiles"
+              className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer whitespace-nowrap"
+              title="Sign in with Google to sync SNN profiles to Google Drive"
             >
-              <div className="gsi-material-button-icon w-4 h-4 shrink-0">
-                <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4 block">
-                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                  <path fill="none" d="M0 0h48v48H0z"></path>
-                </svg>
-              </div>
-              <span className="gsi-material-button-contents font-sans font-medium">Sign in with Google</span>
+              <LogIn className="w-3.5 h-3.5 text-sky-400" />
+              <span>Sign In</span>
             </button>
           )}
         </div>

@@ -104,7 +104,19 @@ export default function App() {
   }
   const engine = engineRef.current;
 
-  const [activeTab, setActiveTab] = useState<SubstrateTab>('topology');
+  const [activeTab, setActiveTab] = useState<SubstrateTab>(() => {
+    try {
+      const saved = window.localStorage.getItem('synapse_active_tab_v1') as SubstrateTab | null;
+      if (saved) return saved;
+    } catch (_) {}
+    return 'topology';
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('synapse_active_tab_v1', activeTab);
+    } catch (_) {}
+  }, [activeTab]);
 
   const [isPaused, setIsPaused] = useState(false);
   const [, setTick] = useState(0);
@@ -129,10 +141,10 @@ export default function App() {
 
   // Autonomous Recursive Self-Improvement (RSI) & Anti-Divergence State
   const [rsiState, setRsiState] = useState<AutonomousSelfImprovementState>(() => ({
-    isActive: true, // ACTIVE by default!
-    mode: 'event_triggered',
-    cycleIntervalSeconds: 60,
-    divergenceThreshold: 0.35,
+    isActive: false, // Paused by default to prevent background Gemini API quota drain
+    mode: 'manual',
+    cycleIntervalSeconds: 120,
+    divergenceThreshold: 0.45,
     autoRollbackOnDivergenceSpike: true,
     totalEpochsCompleted: 0,
     totalDivergencesPrevented: 0,
@@ -761,323 +773,155 @@ export default function App() {
         divergenceRiskIndex={rsiState.currentMetrics.divergenceRiskIndex}
       />
 
-      {/* Navigation Bar / Tabs */}
-      <nav className="bg-slate-900/60 border-b border-slate-800 px-4 py-2">
-        <div className="max-w-7xl mx-auto flex items-center justify-between overflow-x-auto gap-2 no-scrollbar">
-          <div className="flex items-center gap-1.5">
+      {/* Clean Scientific Workspace Navigation Bar */}
+      <nav className="bg-[#0B0E17] border-b border-slate-800/90 px-4 py-2">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
             <button
               onClick={() => setActiveTab('topology')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 activeTab === 'topology'
-                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  ? 'bg-sky-600 text-white'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
               }`}
             >
               <Cpu className="w-3.5 h-3.5" />
-              <span>Neural Topology & Spiking Dynamics</span>
-            </button>
-
-            {/* Gova <-> Google Antigravity Unified Bridge (f86b5c0 Baseline) */}
-            <button
-              onClick={() => setActiveTab('antigravity')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'antigravity'
-                  ? 'bg-gradient-to-r from-indigo-600 via-violet-600 to-emerald-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-emerald-400/50'
-                  : 'text-slate-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-500/30'
-              }`}
-            >
-              <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Antigravity Bridge</span>
-              <span className="text-[9px] bg-emerald-500/20 px-1.5 py-0.2 rounded text-emerald-300 font-mono">
-                f86b5c0
-              </span>
-            </button>
-
-            {/* SynapseEdge Watchdog Tab (Ghost Protocol Action Boundary) */}
-            <button
-              onClick={() => setActiveTab('watchdog')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'watchdog'
-                  ? 'bg-gradient-to-r from-indigo-700 via-violet-700 to-purple-700 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400/50'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <ShieldAlert className="w-3.5 h-3.5 text-indigo-400" />
-              <span>SynapseEdge Watchdog</span>
-              <span className="text-[9px] bg-indigo-500/20 px-1.5 py-0.2 rounded text-indigo-300 font-mono">
-                Ghost Protocol
-              </span>
-            </button>
-
-            {/* Subsystem Integrity Dashboard Tab */}
-            <button
-              onClick={() => setActiveTab('integrity')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'integrity'
-                  ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white shadow-md shadow-emerald-600/30 ring-1 ring-emerald-400/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Subsystem Integrity</span>
-              <span className="text-[9px] bg-emerald-500/20 px-1.5 py-0.2 rounded text-emerald-300 font-mono">
-                Model Health
-              </span>
-            </button>
-
-            {/* Diagnostic Trend Analyzer Tab */}
-            <button
-              onClick={() => setActiveTab('trends')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'trends'
-                  ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-sky-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Diagnostic Trends</span>
-              <span className="text-[9px] bg-indigo-500/20 px-1.5 py-0.2 rounded text-indigo-300 font-mono">
-                Regression
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('matrix')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'matrix'
-                  ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <Network className="w-3.5 h-3.5" />
-              <span>Synaptic Matrix & STDP</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('aer')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'aer'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <Terminal className="w-3.5 h-3.5" />
-              <span>AER Stream Bus</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('substrate')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'substrate'
-                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/20'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Substrate & Red Team</span>
-              <span className="text-[9px] bg-cyan-500/20 px-1.5 py-0.2 rounded text-cyan-300 font-mono">
-                Keel / Invariants
-              </span>
-            </button>
-
-            {/* Autonomous Recursive Self-Improvement (RSI) Tab */}
-            <button
-              onClick={() => setActiveTab('rsi')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'rsi'
-                  ? 'bg-gradient-to-r from-indigo-600 to-sky-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-sky-400/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-              <span>Autonomous Self-Improvement</span>
-              <span
-                className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold ${
-                  rsiState.isActive
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                    : 'bg-slate-800 text-slate-400 border border-slate-700'
-                }`}
-              >
-                {rsiState.isActive
-                  ? `RSI ACTIVE (${(rsiState.currentMetrics.divergenceRiskIndex * 100).toFixed(0)}%)`
-                  : 'STANDBY'}
-              </span>
-            </button>
-
-            {/* Unified Telemetry Health-Check Monitor & Dedicated Performance Buffer Tab */}
-            <button
-              onClick={() => setActiveTab('health')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'health'
-                  ? 'bg-gradient-to-r from-emerald-600 to-cyan-600 text-white shadow-md shadow-emerald-600/30 ring-1 ring-emerald-400/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <Activity className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Telemetry Health & Buffer</span>
-              <span className="text-[9px] bg-emerald-500/20 px-1.5 py-0.2 rounded text-emerald-300 font-mono">
-                5 Subsystems
-              </span>
-            </button>
-
-            {/* Subsystem Heartbeat & Inter-Clock Synchrony Monitor Tab */}
-            <button
-              onClick={() => setActiveTab('heartbeat')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'heartbeat'
-                  ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow-md shadow-rose-600/30 ring-1 ring-rose-400/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <Heart className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
-              <span>Subsystem Heartbeat</span>
-              <span className="text-[9px] bg-rose-500/20 px-1.5 py-0.2 rounded text-rose-300 font-mono">
-                Phase Lock
-              </span>
-            </button>
-
-            {/* Sparse Autoencoder (SAE) Monosemanticity & Runaway Interceptor */}
-            <button
-              onClick={() => setActiveTab('sae')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'sae'
-                  ? 'bg-gradient-to-r from-amber-600 via-rose-600 to-purple-600 text-white shadow-md shadow-rose-600/30 ring-1 ring-rose-400/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5 text-amber-400" />
-              <span>SAE Monosemanticity</span>
-              <span
-                className={`text-[9px] px-1.5 py-0.2 rounded font-mono ${
-                  saeSnapshot.isRunaway
-                    ? 'bg-rose-500 text-white animate-pulse'
-                    : 'bg-amber-500/20 text-amber-300'
-                }`}
-              >
-                {saeSnapshot.isRunaway ? 'RUNAWAY' : 'L₀: 6.2%'}
-              </span>
-            </button>
-
-            {/* SynapticDriftGuard: 2nd-Order Derivative & Corrective LTD Interceptor */}
-            <button
-              onClick={() => setActiveTab('driftguard')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'driftguard'
-                  ? 'bg-gradient-to-r from-rose-600 via-pink-600 to-amber-600 text-white shadow-md shadow-rose-600/30 ring-1 ring-rose-400/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
-              <span>Synaptic Drift Guard</span>
-              <span
-                className={`text-[9px] px-1.5 py-0.2 rounded font-mono ${
-                  driftGuardSnapshot.isAnyClusterExceeding
-                    ? 'bg-rose-500 text-white animate-pulse'
-                    : 'bg-rose-500/20 text-rose-300'
-                }`}
-              >
-                {driftGuardSnapshot.isAnyClusterExceeding
-                  ? 'LTD ENGAGED'
-                  : `v: ${driftGuardSnapshot.maxDriftVelocity.toFixed(2)}`}
-              </span>
-            </button>
-
-            {/* Gemini Argon: Neuromorphic Robotics Helping Hand */}
-            <button
-              onClick={() => setActiveTab('robotics')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'robotics'
-                  ? 'bg-gradient-to-r from-cyan-600 via-teal-600 to-indigo-600 text-white shadow-md shadow-cyan-600/30 ring-1 ring-cyan-400/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <HandMetal className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Argon Robotics</span>
-              <span className="text-[9px] bg-cyan-500/20 px-1.5 py-0.2 rounded text-cyan-300 font-mono">
-                Helping Hand
-              </span>
-            </button>
-
-            {/* Gova Broadcaster Architecture & Live API Hub */}
-            <button
-              onClick={() => setActiveTab('gova')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'gova'
-                  ? 'bg-gradient-to-r from-sky-600 via-indigo-600 to-purple-600 text-white shadow-md shadow-sky-600/30 ring-1 ring-sky-400/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <Radio className="w-3.5 h-3.5 text-sky-400" />
-              <span>Gova Broadcaster Hub</span>
-              <span className="text-[9px] bg-sky-500/20 px-1.5 py-0.2 rounded text-sky-300 font-mono">
-                Live Duplex / JSONL
-              </span>
+              <span>Neural Topology</span>
             </button>
 
             <button
               onClick={() => setActiveTab('chat')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 activeTab === 'chat'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  ? 'bg-sky-600 text-white'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
               }`}
             >
               <MessageSquare className="w-3.5 h-3.5" />
-              <span>Gemini Chatbot</span>
-              <span className="text-[9px] bg-indigo-500/20 px-1.5 py-0.2 rounded text-indigo-300 font-mono">
-                Gemini 4 Argon + Spark
-              </span>
+              <span>Gemini Copilot</span>
             </button>
 
-            <button
-              onClick={() => setActiveTab('image')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'image'
-                  ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <ImageIcon className="w-3.5 h-3.5" />
-              <span>Neuromorphic Studio</span>
-              <span className="text-[9px] bg-purple-500/20 px-1.5 py-0.2 rounded text-purple-300 font-mono">
-                1K, 2K, 4K
-              </span>
-            </button>
-
-            {/* Tab: Google Drive Storage Quota & Automated Telemetry Sync */}
-            <button
-              onClick={() => setActiveTab('drive')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'drive'
-                  ? 'bg-gradient-to-r from-indigo-600 via-sky-600 to-emerald-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-sky-400/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <HardDrive className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Google Drive</span>
-              <span className="text-[9px] bg-indigo-500/20 px-1.5 py-0.2 rounded text-indigo-300 font-mono">
-                Sync & Quota
-              </span>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs">
             <button
               onClick={() => setActiveTab('antigravity')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 activeTab === 'antigravity'
-                  ? 'bg-gradient-to-r from-indigo-600 via-violet-600 to-emerald-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-emerald-400/40'
-                  : 'bg-gradient-to-r from-sky-600 via-indigo-600 to-purple-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-md shadow-sky-600/25'
+                  ? 'bg-sky-600 text-white'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
               }`}
-              title="Open Gova <-> Google Antigravity Unified Bridge Workspace"
             >
-              <FolderSync className="w-3.5 h-3.5 text-sky-200" />
+              <FolderSync className="w-3.5 h-3.5" />
               <span>Antigravity Bridge</span>
-              <span className="text-[9px] bg-white/20 px-1.5 py-0.2 rounded font-mono">
-                f86b5c0
-              </span>
             </button>
 
+            <button
+              onClick={() => setActiveTab('gova')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeTab === 'gova'
+                  ? 'bg-sky-600 text-white'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5" />
+              <span>Gova Broadcaster</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('matrix')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeTab === 'matrix'
+                  ? 'bg-sky-600 text-white'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
+              }`}
+            >
+              <Network className="w-3.5 h-3.5" />
+              <span>Synaptic Matrix &amp; STDP</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('watchdog')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeTab === 'watchdog'
+                  ? 'bg-sky-600 text-white'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>Watchdog &amp; Security</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('integrity')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeTab === 'integrity'
+                  ? 'bg-sky-600 text-white'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Subsystem Integrity</span>
+            </button>
+
+            {/* Secondary Laboratory & Telemetry Workspaces Selector */}
+            <div className="flex items-center gap-1.5 pl-2 ml-1 border-l border-slate-800">
+              <span className="text-[11px] text-slate-500 hidden xl:inline whitespace-nowrap">Lab Tools:</span>
+              <select
+                value={
+                  [
+                    'trends',
+                    'aer',
+                    'substrate',
+                    'rsi',
+                    'health',
+                    'heartbeat',
+                    'sae',
+                    'driftguard',
+                    'robotics',
+                    'image',
+                    'drive',
+                  ].includes(activeTab)
+                    ? activeTab
+                    : ''
+                }
+                onChange={(e) => {
+                  if (e.target.value) setActiveTab(e.target.value as SubstrateTab);
+                }}
+                className={`bg-slate-900 border rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:border-sky-500 cursor-pointer ${
+                  [
+                    'trends',
+                    'aer',
+                    'substrate',
+                    'rsi',
+                    'health',
+                    'heartbeat',
+                    'sae',
+                    'driftguard',
+                    'robotics',
+                    'image',
+                    'drive',
+                  ].includes(activeTab)
+                    ? 'border-sky-500 text-sky-300'
+                    : 'border-slate-800 text-slate-300'
+                }`}
+              >
+                <option value="" disabled>
+                  More Diagnostics &amp; Labs...
+                </option>
+                <option value="health">Telemetry Health &amp; Buffer</option>
+                <option value="driftguard">Synaptic Drift Guard</option>
+                <option value="sae">SAE Monosemanticity</option>
+                <option value="heartbeat">Subsystem Heartbeat</option>
+                <option value="trends">Diagnostic Trend Analyzer</option>
+                <option value="rsi">Autonomous Self-Improvement (RSI)</option>
+                <option value="aer">AER Stream Bus Inspector</option>
+                <option value="substrate">Substrate &amp; Red-Team Audit</option>
+                <option value="robotics">Argon Robotics Studio</option>
+                <option value="image">Neuromorphic Image Studio</option>
+                <option value="drive">Google Drive Sync</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs shrink-0">
             <SNNPersonalityManager
               currentTuning={activeTuning}
               currentStdpConfig={stdpConfig}
@@ -1085,13 +929,6 @@ export default function App() {
               onApplyPersonality={handleApplyPersonality}
               onExportPersonality={handleExportPersonality}
             />
-
-            <div className="hidden lg:flex items-center gap-2 text-xs font-mono text-slate-400">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                Live SNN Loop
-              </span>
-            </div>
           </div>
         </div>
       </nav>
@@ -1132,33 +969,6 @@ export default function App() {
         {/* Tab 1: Neural Topology & Spiking Dynamics */}
         {activeTab === 'topology' && (
           <div className="flex flex-col gap-4">
-            {/* Quick Model Health & Subsystem Integrity Strip */}
-            <div className="bg-slate-900/90 border border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-md">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-white">Subsystem Integrity Monitor</span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
-                      AER • STDP • LIF • KEEL • DRIFT GUARD
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Live aggregate health across 5 SNN subsystems (AER bus: {telemetry.aerLatencyMs.toFixed(2)}ms, STDP: {(engine.stdpConfig.aMinus / Math.max(0.001, engine.stdpConfig.aPlus)).toFixed(2)}x, Firing: {telemetry.meanFiringRateHz.toFixed(1)}Hz, Keel: {(telemetry.substrateKeel?.valence ?? 1.53) >= 0 ? '+' : ''}{(telemetry.substrateKeel?.valence ?? 1.53).toFixed(2)}, DRI: {driftGuardSnapshot.driftRiskIndex.toFixed(0)}%)
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setActiveTab('integrity')}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:border-emerald-400"
-              >
-                <span>Open Integrity Dashboard</span>
-                <ArrowRight className="w-3.5 h-3.5 text-emerald-400" />
-              </button>
-            </div>
-
             {/* Model Diagnostic Adjustments Card */}
             <MemoizedModelAdjustmentsCard
               diagnostic={modelDiagnostic}
@@ -1199,58 +1009,19 @@ export default function App() {
                   onInjectManualPulse={handleInjectManualPulse}
                 />
 
-                {/* Real-time Spike Frequency Histogram Grouped by Neuron Type (Afferent, Cortical, Efferent) */}
+                {/* Real-time Spike Frequency Histogram Grouped by Neuron Type */}
                 <MemoizedSpikeFrequencyHistogram
                   profile={engine.getNetworkFrequencyProfile()}
                   onInjectManualPulse={handleInjectManualPulse}
                 />
               </div>
 
-              {/* Side Summary, Stability Plank & SNN Architecture Details */}
-              <div className="xl:col-span-4 flex flex-col gap-3">
-                {/* Hard-Locked Stability Plank Status */}
+              {/* Right Column: Interactive Stability Plank & Pathway Scrub Controls */}
+              <div className="xl:col-span-4 flex flex-col gap-4">
                 <MemoizedHardLockedPlankCard
                   plank={AntiDivergenceEngine.getActivePlankStatus(activeTuning, rsiState.currentMetrics.divergenceRiskIndex)}
                 />
 
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 text-xs space-y-2.5 shadow">
-                  <div className="flex items-center gap-1.5 text-sky-400 font-semibold border-b border-slate-800 pb-2">
-                    <Info className="w-4 h-4" />
-                    <span>Biological SNN Processor Architecture</span>
-                  </div>
-
-                  <p className="text-slate-300 leading-relaxed">
-                    Event-driven neuromorphic processor core processing asynchronous temporal spike trains across a 3-column biological circuit (8 Afferent Inputs → 8 Cortical Interneurons → 4 Efferent Decoders).
-                  </p>
-
-                  <div className="space-y-1.5 font-mono text-[11px] bg-[#090d16] p-2.5 rounded border border-slate-800">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Afferent Layer:</span>
-                      <span className="text-emerald-400">8 Stimulus Channels (E0-E7)</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Association Layer:</span>
-                      <span className="text-sky-400">8 Plastic Interneurons (N8-N15)</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Efferent Readout:</span>
-                      <span className="text-amber-400">4 Decoders (O16-O19)</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Plasticity Mode:</span>
-                      <span className="text-purple-400">Online STDP + BCM Scaling</span>
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
-                    <span className="text-slate-400">Dynamic Synapse Operations:</span>
-                    <span className="font-mono font-bold text-amber-300">
-                      {telemetry.synapticOpsPerSec.toLocaleString()} SOP/s
-                    </span>
-                  </div>
-                </div>
-
-                {/* Real-time Neuromorphic Stability Panel with Shadow Validation History, Auto-Scrub & Divergence Heatmap */}
                 <MemoizedNeuralStabilityPanel
                   telemetry={telemetry}
                   neurons={neurons}
@@ -1278,25 +1049,6 @@ export default function App() {
                   sparsityPct={engine.networkSparsityPct}
                   totalPrunedCount={engine.totalPrunedPathwaysCount}
                 />
-
-                {/* Quick STDP Activity Status */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 text-xs space-y-2 shadow">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-200">Online Plasticity Status</span>
-                    <span className="font-mono text-emerald-400 font-bold">
-                      {stdpConfig.enabled ? 'ACTIVE LEARNING' : 'WEIGHTS LOCKED'}
-                    </span>
-                  </div>
-                  <p className="text-slate-400 text-[11px]">
-                    Spike-Timing-Dependent Plasticity continuously adjusts synaptic weights. Presynaptic spikes preceding postsynaptic spikes induce LTP ($A_+$), while reverse timing triggers LTD ($A_-$).
-                  </p>
-                  <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-gradient-to-r from-sky-500 to-emerald-400 h-full transition-all duration-300"
-                      style={{ width: `${Math.min(100, (telemetry.meanFiringRateHz / 55) * 100)}%` }}
-                    />
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -1499,8 +1251,10 @@ export default function App() {
         {/* Tab 6: Gova Broadcaster Architecture & Live API Telemetry Hub */}
         {activeTab === 'gova' && <MemoizedGovaBroadcasterStudio />}
 
-        {/* Tab 7: Gemini Chatbot Copilot */}
-        {activeTab === 'chat' && <MemoizedGeminiChatPanel telemetry={telemetry} />}
+        {/* Tab 7: Gemini Chatbot Copilot (Kept mounted across tab switches to preserve active streams & scroll state) */}
+        <div className={activeTab === 'chat' ? 'block' : 'hidden'}>
+          <MemoizedGeminiChatPanel telemetry={telemetry} />
+        </div>
 
         {/* Tab 8: Neuromorphic Studio Image Generation */}
         {activeTab === 'image' && <MemoizedNeuromorphicImageGenerator />}

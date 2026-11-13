@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { resolveSafeRepoPath, isProtectedImmutableFile } from "./security";
 import {
   classifyTargetProtectionTier,
@@ -142,6 +144,54 @@ let bridgeChatHistory: AntigravityChatTurn[] = [
     govaCadenceVerified: true,
   },
 ];
+
+const BRIDGE_STATE_FILE = path.join(process.cwd(), "data", "antigravity_bridge_state.json");
+
+function loadPersistedBridgeState(): void {
+  try {
+    if (fs.existsSync(BRIDGE_STATE_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(BRIDGE_STATE_FILE, "utf-8"));
+      if (Array.isArray(parsed.proposals) && parsed.proposals.length > 0) {
+        bridgeProposals = parsed.proposals;
+      }
+      if (parsed.telemetry && typeof parsed.telemetry === "object") {
+        bridgeTelemetry = { ...bridgeTelemetry, ...parsed.telemetry };
+      }
+      if (Array.isArray(parsed.chatHistory) && parsed.chatHistory.length > 0) {
+        bridgeChatHistory = parsed.chatHistory;
+      }
+    }
+  } catch {
+    // Keep defaults if state file is missing or malformed
+  }
+}
+
+function savePersistedBridgeState(): void {
+  try {
+    const dir = path.dirname(BRIDGE_STATE_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(
+      BRIDGE_STATE_FILE,
+      JSON.stringify(
+        {
+          telemetry: bridgeTelemetry,
+          proposals: bridgeProposals,
+          chatHistory: bridgeChatHistory,
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+  } catch {
+    // Non-blocking disk write
+  }
+}
+
+loadPersistedBridgeState();
 
 /**
  * Verifies the 16-neuron, 39-synapse CSR/CSC sparse adjacency bijective mapping.
@@ -445,6 +495,7 @@ export function stageAntigravityPatch(params: {
   } else {
     bridgeProposals = [proposal, ...bridgeProposals];
   }
+  savePersistedBridgeState();
 
   return {
     proposal,
@@ -518,6 +569,7 @@ export function setProposalWriteApproval(params: {
     approvedByUid: nextApproved ? params.ownerUid : null,
   };
   bridgeProposals[idx] = updated;
+  savePersistedBridgeState();
 
   return {
     ok: true,
@@ -532,6 +584,7 @@ export function setBridgeTelemetryTier(tier: ProvenanceTier): AntigravityTelemet
     provenanceTier: tier,
   });
   bridgeTelemetry = validated.telemetry;
+  savePersistedBridgeState();
   return bridgeTelemetry;
 }
 
@@ -551,6 +604,7 @@ export function ingestSimulatedHarnessRun(): {
     dwtCycles,
   });
   bridgeTelemetry = validated.telemetry;
+  savePersistedBridgeState();
   return {
     telemetry: bridgeTelemetry,
     bijection: verifyCsrCscBijection(),
@@ -558,7 +612,8 @@ export function ingestSimulatedHarnessRun(): {
 }
 
 export function recordAntigravityChatTurn(turn: AntigravityChatTurn): void {
-  bridgeChatHistory = [...bridgeChatHistory.slice(-49), turn];
+  bridgeChatHistory = [...bridgeChatHistory.slice(-99), turn];
+  savePersistedBridgeState();
 }
 
 export function getAntigravityBridgeState() {

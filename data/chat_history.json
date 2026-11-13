@@ -1,0 +1,15 @@
+{
+  "messages": [
+    {
+      "id": "init-1",
+      "role": "assistant",
+      "content": "Neuromorphic Systems Copilot online.",
+      "timestamp": 1762980000000
+    }
+  ],
+  "selectedRole": "neuromorphic_architect",
+  "modelTier": "general",
+  "responseFormatMode": "s1_thesis",
+  "messageFeedback": {},
+  "updatedAt": 1794527169129
+}

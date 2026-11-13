@@ -29,6 +29,8 @@ import {
   Mic,
   Square,
   CornerDownLeft,
+  Trash2,
+  GitPullRequest,
 } from 'lucide-react';
 import { AudioListenButton } from './AudioListenButton';
 import { useAudioVoice } from '../context/AudioContext';
@@ -176,23 +178,51 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
     stopAudio,
   } = useAudioVoice();
 
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'init-1',
-      role: 'assistant',
-      content:
-        'Neuromorphic Systems Copilot online under Gemini 4 Argon (gemini-4-argon — Biologically-Restructured Primary & Bio-RSI Engine), paired with Watchdog Protocol Argon governance and Spark (3.1 Pro) + 3.8 Flash verification. Select a directive from the prompt dropdown or enter a circuit query below.',
-      timestamp: Date.now(),
-      modelUsed: 'gemini-4-argon (Bio-RSI Primary + Spark/3.1-Pro Verification)',
-      roleUsed: 'neuromorphic_architect',
-    },
-  ]);
+  const CHAT_STORAGE_KEY = 'synapse_gemini_chat_messages_v1';
+  const CHAT_PREFS_KEY = 'synapse_gemini_chat_prefs_v1';
+
+  const DEFAULT_INIT_MESSAGE: ChatMessage = {
+    id: 'init-1',
+    role: 'assistant',
+    content:
+      'Neuromorphic Systems Copilot online under Gemini 4 Argon (gemini-4-argon). All conversation turns are automatically persisted across page reloads and server updates. Select a directive from the prompt library or enter a query below.',
+    timestamp: Date.now(),
+    modelUsed: 'gemini-4-argon',
+    roleUsed: 'neuromorphic_architect',
+  };
+
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const saved = window.localStorage.getItem(CHAT_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (_) {}
+    return [DEFAULT_INIT_MESSAGE];
+  });
 
   const [inputMessage, setInputMessage] = useState('');
-  const [modelTier, setModelTier] = useState<'fast' | 'general' | 'complex'>('general');
+  const [modelTier, setModelTier] = useState<'fast' | 'general' | 'complex'>(() => {
+    try {
+      const prefs = JSON.parse(window.localStorage.getItem(CHAT_PREFS_KEY) || '{}');
+      if (prefs.modelTier === 'fast' || prefs.modelTier === 'general' || prefs.modelTier === 'complex') {
+        return prefs.modelTier;
+      }
+    } catch (_) {}
+    return 'general';
+  });
   const [selectedRole, setSelectedRole] = useState<
     'neuromorphic_architect' | 'plasticity_researcher' | 'edge_firmware_engineer' | 'gova_broadcaster'
-  >('neuromorphic_architect');
+  >(() => {
+    try {
+      const prefs = JSON.parse(window.localStorage.getItem(CHAT_PREFS_KEY) || '{}');
+      if (prefs.selectedRole) return prefs.selectedRole;
+    } catch (_) {}
+    return 'neuromorphic_architect';
+  });
   const [attachTelemetry, setAttachTelemetry] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -217,7 +247,13 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
   const [showCompletedBufferLog, setShowCompletedBufferLog] = useState(false);
 
   // Dropdown Composer State
-  const [responseFormatMode, setResponseFormatMode] = useState<ResponseFormatMode>('s1_thesis');
+  const [responseFormatMode, setResponseFormatMode] = useState<ResponseFormatMode>(() => {
+    try {
+      const prefs = JSON.parse(window.localStorage.getItem(CHAT_PREFS_KEY) || '{}');
+      if (prefs.responseFormatMode) return prefs.responseFormatMode;
+    } catch (_) {}
+    return 's1_thesis';
+  });
   const [isDirectiveDropdownOpen, setIsDirectiveDropdownOpen] = useState(false);
   const [isFormatDropdownOpen, setIsFormatDropdownOpen] = useState(false);
   const [isTelemetryDropdownOpen, setIsTelemetryDropdownOpen] = useState(false);
@@ -226,7 +262,16 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
   // Copy-Paste & Thumbs Up/Down Feedback State
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [pastedNotice, setPastedNotice] = useState<string | null>(null);
-  const [messageFeedback, setMessageFeedback] = useState<Record<string, 'up' | 'down'>>({});
+  const [messageFeedback, setMessageFeedback] = useState<Record<string, 'up' | 'down'>>(() => {
+    try {
+      const prefs = JSON.parse(window.localStorage.getItem(CHAT_PREFS_KEY) || '{}');
+      if (prefs.messageFeedback && typeof prefs.messageFeedback === 'object') {
+        return prefs.messageFeedback;
+      }
+    } catch (_) {}
+    return {};
+  });
+  const [patchStatusByMsg, setPatchStatusByMsg] = useState<Record<string, string>>({});
 
   // Push-to-Talk (PTT) Audio-to-Text State
   const [isPttRecording, setIsPttRecording] = useState(false);
@@ -260,6 +305,101 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
   useEffect(() => {
     scrollToBottom();
   }, [messages, streamBuffer.committedText, streamBuffer.activeBufferSegment, isLoading]);
+
+  // Hydrate from server-side persistent disk history on mount if server has newer/more turns
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/chat/history')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data || !Array.isArray(data.messages) || data.messages.length === 0) return;
+        setMessages((localMsgs) => {
+          if (data.messages.length > localMsgs.length) {
+            try {
+              window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(data.messages));
+            } catch (_) {}
+            return data.messages;
+          }
+          return localMsgs;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist messages & preferences to localStorage and server disk whenever they change
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+      window.localStorage.setItem(
+        CHAT_PREFS_KEY,
+        JSON.stringify({
+          selectedRole,
+          modelTier,
+          responseFormatMode,
+          messageFeedback,
+        })
+      );
+    } catch (_) {}
+
+    fetch('/api/chat/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages,
+        selectedRole,
+        modelTier,
+        responseFormatMode,
+        messageFeedback,
+      }),
+    }).catch(() => {});
+  }, [messages, selectedRole, modelTier, responseFormatMode, messageFeedback]);
+
+  const handleClearHistory = async () => {
+    const fresh: ChatMessage = {
+      ...DEFAULT_INIT_MESSAGE,
+      id: `init-${Date.now()}`,
+      timestamp: Date.now(),
+    };
+    setMessages([fresh]);
+    setMessageFeedback({});
+    setPatchStatusByMsg({});
+    setErrorMsg(null);
+    try {
+      window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify([fresh]));
+      await fetch('/api/chat/history', { method: 'DELETE' });
+    } catch (_) {}
+  };
+
+  const handleApplyMessageDiff = async (msgId: string, content: string) => {
+    setPatchStatusByMsg((prev) => ({ ...prev, [msgId]: 'Applying patch...' }));
+    try {
+      const res = await fetch('/apply-patch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setPatchStatusByMsg((prev) => ({
+          ...prev,
+          [msgId]: `Applied: ${data.stat || 'Working tree updated'}`,
+        }));
+      } else {
+        setPatchStatusByMsg((prev) => ({
+          ...prev,
+          [msgId]: `Rejected: ${data.error || 'Validation failed'}`,
+        }));
+      }
+    } catch (err: any) {
+      setPatchStatusByMsg((prev) => ({
+        ...prev,
+        [msgId]: `Error: ${err?.message || 'Failed to apply diff'}`,
+      }));
+    }
+  };
 
   // Cleanup PTT resources on unmount
   useEffect(() => {
@@ -546,6 +686,7 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
         body: JSON.stringify({
           audioBase64: base64Audio,
           mimeType,
+          clientTranscript: interimFallback,
         }),
       });
 
@@ -950,165 +1091,100 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
   return (
     <div
       id="gemini-chatbot-panel"
-      className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col h-[640px] shadow"
+      className="bg-[#0B0E17] border border-slate-800 rounded-xl p-4 flex flex-col h-[680px]"
     >
-      {/* Header with Model Tier & Role Selector */}
+      {/* Header with Model Tier, Role Selector & Persistent Thread Controls */}
       <div className="pb-3 border-b border-slate-800 space-y-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <MessageSquare className="w-4 h-4 text-sky-400" />
             <h3 className="text-sm font-semibold text-slate-100">
               Gemini 4 Argon Neuromorphic Copilot
             </h3>
-            <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400">
-              <span className="text-emerald-300">gemini-4-argon</span>
-              <span aria-hidden="true">·</span>
-              <span className="text-indigo-300">3.1 Pro + 3.8 Eval</span>
-              <span aria-hidden="true">·</span>
-              <span className="text-amber-300 flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-amber-400" />
-                Spark Wrapper
-              </span>
+            <div className="flex items-center gap-1.5 text-xs font-mono text-slate-400">
+              <span>·</span>
+              <span className="text-emerald-400">{messages.length} saved turns</span>
             </div>
           </div>
 
-          {/* Model Tier Selector */}
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
+          <div className="flex items-center gap-2">
+            {/* Model Tier Selector */}
+            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
+              <button
+                onClick={() => setModelTier('fast')}
+                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 whitespace-nowrap ${
+                  modelTier === 'fast'
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Zap className="w-3 h-3" />
+                Fast
+              </button>
+              <button
+                onClick={() => setModelTier('general')}
+                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 whitespace-nowrap ${
+                  modelTier === 'general'
+                    ? 'bg-sky-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Sparkles className="w-3 h-3" />
+                Balanced
+              </button>
+              <button
+                onClick={() => setModelTier('complex')}
+                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 whitespace-nowrap ${
+                  modelTier === 'complex'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Cpu className="w-3 h-3" />
+                Deep Bio-RSI
+              </button>
+            </div>
+
             <button
-              onClick={() => setModelTier('fast')}
-              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
-                modelTier === 'fast'
-                  ? 'bg-emerald-600 text-white shadow'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="gemini-4-argon (Fast Reflex Pass) with Gemini Spark + 3.1 Pro Wrapper"
+              type="button"
+              onClick={handleClearHistory}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-rose-300 text-xs flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              title="Clear persisted conversation history and start a fresh thread"
             >
-              <Zap className="w-3 h-3" />
-              Argon Fast
-            </button>
-            <button
-              onClick={() => setModelTier('general')}
-              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
-                modelTier === 'general'
-                  ? 'bg-sky-600 text-white shadow'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="gemini-4-argon (Balanced Bio-Plasticity) with Gemini Spark + 3.1 Pro Reasoning & Coding Wrapper"
-            >
-              <Sparkles className="w-3 h-3" />
-              Argon + Spark (General)
-            </button>
-            <button
-              onClick={() => setModelTier('complex')}
-              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
-                modelTier === 'complex'
-                  ? 'bg-indigo-600 text-white shadow'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="gemini-4-argon (Deep Bio-RSI 3-Pass Plasticity) + Gemini Spark Ignition + 3.1 Pro Verification"
-            >
-              <Cpu className="w-3 h-3" />
-              Argon Deep Bio-RSI
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear Thread</span>
             </button>
           </div>
-        </div>
-
-        {/* Active 3.1 Pro + Gemini Spark Wrapper Skills Strip */}
-        <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/80 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[10px] font-mono text-slate-400">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-indigo-300 font-semibold flex items-center gap-1">
-              <Brain className="w-3 h-3 text-indigo-400" />
-              Active Pipeline:
-            </span>
-            <span className="text-amber-300">Lateral Hypothesis Ignition</span>
-            <span aria-hidden="true">·</span>
-            <span className="text-sky-300">Causal & Differential Reasoning</span>
-            <span aria-hidden="true">·</span>
-            <span className="text-emerald-300">48-Char Affirmation Buffer Gate</span>
-          </div>
-
-          {streamBuffer.chunks.length > 0 && !streamBuffer.isStreaming && (
-            <button
-              onClick={() => setShowCompletedBufferLog((prev) => !prev)}
-              className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center gap-1 transition-colors"
-            >
-              <Layers className="w-3 h-3" />
-              <span>
-                {showCompletedBufferLog ? 'Hide Last Stream Buffer' : `Inspect Last Stream Buffer (${streamBuffer.chunks.length} chunks)`}
-              </span>
-            </button>
-          )}
         </div>
 
         {/* Role & Telemetry Context Bar */}
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
-            <span className="text-slate-400 text-[11px]">System Role:</span>
+            <span className="text-slate-400 text-[11px]">Persona:</span>
             <select
               value={selectedRole}
               onChange={(e: any) => setSelectedRole(e.target.value)}
-              className="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+              className="bg-slate-900 border border-slate-800 text-slate-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-sky-500"
             >
-              <option value="neuromorphic_architect">Elena Vance (Neuromorphic Silicon Architect)</option>
-              <option value="plasticity_researcher">Marcus Zhang (Synaptic Plasticity Researcher)</option>
-              <option value="edge_firmware_engineer">Alex Rivera (Edge Neuromorphic Systems Engineer)</option>
-              <option value="gova_broadcaster">🎙️ Gova (Authoritative Broadcaster & Thought Partner)</option>
+              <option value="neuromorphic_architect">Elena Vance · Neuromorphic Silicon Architect</option>
+              <option value="plasticity_researcher">Marcus Zhang · Synaptic Plasticity Researcher</option>
+              <option value="edge_firmware_engineer">Alex Rivera · Edge Neuromorphic Engineer</option>
+              <option value="gova_broadcaster">Gova · Authoritative Broadcaster & Thought Partner</option>
             </select>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Expressive Neural Voice Timbre Selector */}
-            <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded px-2 py-0.5 text-[10px]">
-              <span className="text-slate-400">Voice:</span>
-              <select
-                value={preferredVoice}
-                onChange={(e: any) => setPreferredVoice(e.target.value)}
-                className="bg-transparent text-sky-300 font-mono focus:outline-none cursor-pointer"
-                title="Select Gemini 3.8 Expressive TTS Voice Persona"
-              >
-                <option value="Kore" className="bg-slate-900 text-slate-200">Kore (Warm Articulate)</option>
-                <option value="Zephyr" className="bg-slate-900 text-slate-200">Zephyr (Fluid Scientist)</option>
-                <option value="Charon" className="bg-slate-900 text-slate-200">Charon (Deep Broadcast)</option>
-                <option value="Puck" className="bg-slate-900 text-slate-200">Puck (Conversational)</option>
-                <option value="Fenrir" className="bg-slate-900 text-slate-200">Fenrir (Resonant Baritone)</option>
-              </select>
-            </div>
-
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => setWarmthMasterEnabled(!warmthMasterEnabled)}
-              className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+              className={`px-2 py-0.5 rounded text-[11px] font-mono border transition-colors ${
                 warmthMasterEnabled
                   ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
-                  : 'bg-slate-800 text-slate-400 border-slate-700'
+                  : 'bg-slate-900 text-slate-400 border-slate-800'
               }`}
               title="3-Band Web Audio Studio Vocal Warmth & De-Harshing EQ"
             >
               {warmthMasterEnabled ? 'Warmth EQ: ON' : 'Warmth EQ: OFF'}
-            </button>
-
-            <button
-              onClick={() => {
-                if (isAudioPlaying) stopAudio();
-                setAutoAudioReadout((prev: boolean) => !prev);
-              }}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-                autoAudioReadout
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                  : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-200'
-              }`}
-              title={
-                autoAudioReadout
-                  ? 'Auto Audio Readout Active: Assistant responses are spoken aloud automatically'
-                  : 'Auto Audio Readout Off'
-              }
-            >
-              {autoAudioReadout ? (
-                <Volume2 className="w-3 h-3 text-emerald-400" />
-              ) : (
-                <VolumeX className="w-3 h-3 text-slate-400" />
-              )}
-              <span>Auto Audio: {autoAudioReadout ? 'ON' : 'OFF'}</span>
             </button>
 
             <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 text-[11px]">
@@ -1118,189 +1194,136 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
                 onChange={(e) => setAttachTelemetry(e.target.checked)}
                 className="rounded border-slate-700 text-sky-600 focus:ring-sky-500"
               />
-              <span>Inject Live Device Telemetry ({telemetry.powerMw}mW)</span>
+              <span>Attach Live Telemetry ({telemetry.powerMw.toFixed(2)} mW)</span>
             </label>
           </div>
         </div>
       </div>
 
-      {/* Scrollable Finalized Conversation Thread + Real-Time Streaming Response Buffer */}
+      {/* Scrollable Persisted Conversation Thread */}
       <div className="flex-1 overflow-y-auto py-3 space-y-3 pr-1 text-xs">
         {messages.map((msg) => {
           const currentRating = messageFeedback[msg.id] || null;
           const isCopied = copiedMessageId === msg.id;
+          const hasUnifiedDiff =
+            msg.role === 'assistant' &&
+            (msg.content.includes('```diff') ||
+              (msg.content.includes('--- a/') && msg.content.includes('+++ b/')));
+          const patchStatus = patchStatusByMsg[msg.id];
 
           return (
             <div
               key={msg.id}
-              className={`flex gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               {msg.role === 'assistant' && (
-                <div className="w-7 h-7 rounded-lg bg-sky-500/20 border border-sky-500/40 flex items-center justify-center shrink-0 text-sky-300 mt-0.5">
+                <div className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 text-sky-400 mt-0.5">
                   <Bot className="w-4 h-4" />
                 </div>
               )}
 
               <div
-                className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-slate-200 ${
+                className={`max-w-[85%] rounded-xl px-4 py-3 text-slate-200 ${
                   msg.role === 'user'
-                    ? 'bg-sky-600 text-white rounded-br-xs'
-                    : 'bg-slate-800/90 border border-slate-700/70 rounded-bl-xs leading-relaxed whitespace-pre-wrap'
+                    ? 'bg-sky-600 text-white'
+                    : 'bg-slate-900/90 border border-slate-800 leading-relaxed whitespace-pre-wrap'
                 }`}
               >
-                {msg.role === 'assistant' && (
-                  <div className="mb-1.5 pb-1 border-b border-slate-700/50 flex items-center justify-between gap-3 text-[10px] font-mono text-slate-400">
-                    <span className="text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" />
-                      Finalized Response
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleCopyText(msg.id, msg.content)}
-                        className="px-1.5 py-0.5 rounded bg-slate-900/80 hover:bg-slate-900 text-slate-300 border border-slate-700/80 flex items-center gap-1 transition-colors"
-                        title="Copy response to clipboard"
-                      >
-                        {isCopied ? (
-                          <>
-                            <Check className="w-2.5 h-2.5 text-emerald-400" />
-                            <span className="text-emerald-300">Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-2.5 h-2.5" />
-                            <span>Copy</span>
-                          </>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePasteMessageToInput(msg.content)}
-                        className="px-1.5 py-0.5 rounded bg-slate-900/80 hover:bg-slate-900 text-slate-300 border border-slate-700/80 flex items-center gap-1 transition-colors"
-                        title="Paste response into composer input box"
-                      >
-                        <CornerDownLeft className="w-2.5 h-2.5 text-sky-400" />
-                        <span>To Input</span>
-                      </button>
-                      <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
-                    </div>
+                <div>{msg.content}</div>
+
+                {patchStatus && (
+                  <div className="mt-2 px-2.5 py-1.5 rounded bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-300">
+                    {patchStatus}
                   </div>
                 )}
 
-                <div>{msg.content}</div>
+                <div
+                  className={`mt-2 pt-2 border-t flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono ${
+                    msg.role === 'user'
+                      ? 'border-sky-500/40 text-sky-100'
+                      : 'border-slate-800 text-slate-400'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                    {msg.role === 'assistant' && msg.roleUsed && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>{msg.roleUsed.replace(/_/g, ' ')}</span>
+                      </>
+                    )}
+                    {msg.role === 'assistant' && msg.modelUsed && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="text-slate-500 truncate max-w-[260px]" title={msg.modelUsed}>
+                          {msg.modelUsed}
+                        </span>
+                      </>
+                    )}
+                  </div>
 
-                {msg.role === 'user' && (
-                  <div className="mt-1.5 pt-1 border-t border-sky-500/40 flex items-center justify-end gap-1.5 text-[10px] font-mono text-sky-100">
+                  <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => handleCopyText(msg.id, msg.content)}
-                      className="px-1.5 py-0.5 rounded bg-sky-700/70 hover:bg-sky-700 text-white flex items-center gap-1 transition-colors"
-                      title="Copy prompt"
+                      className={`px-2 py-0.5 rounded flex items-center gap-1 transition-colors ${
+                        msg.role === 'user'
+                          ? 'bg-sky-700/80 hover:bg-sky-700 text-white'
+                          : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800'
+                      }`}
+                      title="Copy message"
                     >
                       {isCopied ? (
                         <>
-                          <Check className="w-2.5 h-2.5 text-emerald-300" />
+                          <Check className="w-3 h-3 text-emerald-400" />
                           <span>Copied</span>
                         </>
                       ) : (
                         <>
-                          <Copy className="w-2.5 h-2.5" />
+                          <Copy className="w-3 h-3" />
                           <span>Copy</span>
                         </>
                       )}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handlePasteMessageToInput(msg.content)}
-                      className="px-1.5 py-0.5 rounded bg-sky-700/70 hover:bg-sky-700 text-white flex items-center gap-1 transition-colors"
-                      title="Paste prompt back into input bar"
-                    >
-                      <ClipboardPaste className="w-2.5 h-2.5" />
-                      <span>Reuse in Input</span>
-                    </button>
-                  </div>
-                )}
 
-                {msg.role === 'assistant' && (
-                  <div className="mt-2 pt-1.5 border-t border-slate-700/60 flex flex-col gap-1.5">
-                    {msg.govaCadenceAudit && (
-                      <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono bg-slate-900/80 px-2.5 py-1 rounded border border-slate-700/80 text-slate-300">
-                        <span className="text-amber-400 font-semibold">🎙️ Gova Audit</span>
-                        <span aria-hidden="true">·</span>
-                        <span
-                          className={
-                            !msg.govaCadenceAudit.hasReflexiveAffirmation
-                              ? 'text-emerald-300'
-                              : 'text-rose-300'
-                          }
-                        >
-                          {!msg.govaCadenceAudit.hasReflexiveAffirmation
-                            ? '✓ Zero Affirmations'
-                            : '✗ Affirmation Detected'}
-                        </span>
-                        <span aria-hidden="true">·</span>
-                        <span
-                          className={
-                            msg.govaCadenceAudit.leadThesisDelivered
-                              ? 'text-sky-300'
-                              : 'text-amber-300'
-                          }
-                        >
-                          {msg.govaCadenceAudit.leadThesisDelivered
-                            ? '✓ Lead Thesis S1'
-                            : '⚠️ Lead Delayed'}
-                        </span>
-                        <span aria-hidden="true">·</span>
-                        <span className="text-slate-400">
-                          Synthesis: <strong className="text-emerald-400">{msg.govaCadenceAudit.synthesisScore}%</strong>
-                        </span>
-                      </div>
+                    {hasUnifiedDiff && (
+                      <button
+                        type="button"
+                        onClick={() => handleApplyMessageDiff(msg.id, msg.content)}
+                        className="px-2 py-0.5 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 flex items-center gap-1 transition-colors"
+                        title="Validate and apply unified diff via POST /apply-patch"
+                      >
+                        <GitPullRequest className="w-3 h-3" />
+                        <span>Apply Diff</span>
+                      </button>
                     )}
 
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-[10px] font-mono text-slate-400 flex items-center gap-1.5">
-                        {msg.modelUsed && <span>Model: {msg.modelUsed}</span>}
-                        {msg.roleUsed && (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span>Role: {msg.roleUsed.replace('_', ' ')}</span>
-                          </>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-1.5">
-                        {/* Thumbs Up / Thumbs Down Feedback Controls */}
-                        <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-700/80 rounded-lg px-1.5 py-0.5">
-                          <button
-                            type="button"
-                            onClick={() => handleMessageFeedback(msg, 'up')}
-                            aria-label="Thumbs up helpful response"
-                            title="Thumbs Up — Mark response as helpful"
-                            className={`p-1 rounded transition-colors flex items-center gap-1 text-[10px] font-mono ${
-                              currentRating === 'up'
-                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                                : 'text-slate-400 hover:text-emerald-300 hover:bg-slate-800'
-                            }`}
-                          >
-                            <ThumbsUp className="w-3 h-3" />
-                            {currentRating === 'up' && <span>Helpful</span>}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleMessageFeedback(msg, 'down')}
-                            aria-label="Thumbs down response needs improvement"
-                            title="Thumbs Down — Flag response for tuning"
-                            className={`p-1 rounded transition-colors flex items-center gap-1 text-[10px] font-mono ${
-                              currentRating === 'down'
-                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                                : 'text-slate-400 hover:text-rose-300 hover:bg-slate-800'
-                            }`}
-                          >
-                            <ThumbsDown className="w-3 h-3" />
-                            {currentRating === 'down' && <span>Flagged</span>}
-                          </button>
-                        </div>
+                    {msg.role === 'assistant' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleMessageFeedback(msg, 'up')}
+                          aria-label="Helpful response"
+                          className={`p-1 rounded border transition-colors ${
+                            currentRating === 'up'
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                              : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-emerald-300'
+                          }`}
+                        >
+                          <ThumbsUp className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMessageFeedback(msg, 'down')}
+                          aria-label="Needs improvement"
+                          className={`p-1 rounded border transition-colors ${
+                            currentRating === 'down'
+                              ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                              : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-rose-300'
+                          }`}
+                        >
+                          <ThumbsDown className="w-3 h-3" />
+                        </button>
 
                         <AudioListenButton
                           text={msg.content}
@@ -1315,14 +1338,14 @@ export const GeminiChatPanel: React.FC<GeminiChatPanelProps> = ({ telemetry }) =
                           }
                           label="Listen"
                         />
-                      </div>
-                    </div>
+                      </>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
 
               {msg.role === 'user' && (
-                <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 text-slate-300 mt-0.5">
+                <div className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 text-slate-300 mt-0.5">
                   <User className="w-4 h-4" />
                 </div>
               )}

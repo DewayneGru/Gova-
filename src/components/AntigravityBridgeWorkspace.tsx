@@ -240,17 +240,32 @@ export const AntigravityBridgeWorkspace: React.FC = () => {
   const [lastPatchStat, setLastPatchStat] = useState<string | null>(null);
   const { quotaState, refreshQuotaState } = useQuotaPauseState();
 
-  const [chatHistory, setChatHistory] = useState<BridgeChatMessage[]>([
-    {
-      id: "msg-1",
-      role: "antigravity",
-      modelTier: "tier2-argon",
-      content:
-        "Antigravity Unified Bridge initialized on baseline commit f86b5c0. All file paths crossing this channel are canonicalized via fs.realpathSync, and autonomous patches require explicit UID write-gate authorization before touching the working tree.",
-      stagedProposalId: "ag-9f31a2c401",
-      timestamp: "00:18:42 UTC",
-    },
-  ]);
+  const [chatHistory, setChatHistory] = useState<BridgeChatMessage[]>(() => {
+    try {
+      const saved = window.localStorage.getItem("synapse_antigravity_chat_v1");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return [
+      {
+        id: "msg-1",
+        role: "antigravity",
+        modelTier: "tier2-argon",
+        content:
+          "Antigravity Unified Bridge initialized on baseline commit f86b5c0. All file paths crossing this channel are canonicalized via fs.realpathSync, and autonomous patches require explicit UID write-gate authorization before touching the working tree.",
+        stagedProposalId: "ag-9f31a2c401",
+        timestamp: "00:18:42 UTC",
+      },
+    ];
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("synapse_antigravity_chat_v1", JSON.stringify(chatHistory));
+    } catch (_) {}
+  }, [chatHistory]);
 
   useEffect(() => {
     let cancelled = false;
@@ -263,7 +278,7 @@ export const AntigravityBridgeWorkspace: React.FC = () => {
           setProposals(data.proposals);
         }
         if (Array.isArray(data.chatHistory) && data.chatHistory.length > 0) {
-          setChatHistory(data.chatHistory);
+          setChatHistory((local) => (data.chatHistory.length >= local.length ? data.chatHistory : local));
         }
       })
       .catch(() => {

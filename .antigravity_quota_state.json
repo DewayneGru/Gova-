@@ -1,0 +1,11 @@
+{
+  "paused": true,
+  "failoverActive": true,
+  "pausedUntilEpoch": 1794529717.242,
+  "remainingSeconds": 3600,
+  "formattedCountdown": "1h 0m 0s",
+  "localFailoverModel": "qwen2.5-coder:7b",
+  "localFailoverEndpoint": "http://127.0.0.1:11434/v1/chat/completions",
+  "lastError": "Your API key prepayment credits are depleted (HTTP 402). Please select an active API key or update project billing in Settings > Secrets.",
+  "updatedAt": 1794526117.242
+}
