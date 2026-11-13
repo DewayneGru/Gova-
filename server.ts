@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
+import { spawnSync } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Modality, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
@@ -2612,6 +2613,100 @@ app.get("/api/watchdog/receipts", (_req, res) => {
     ...getReceiptLedger(),
   });
 });
+
+// Unified Kuramoto Homeostatic Governor (R_TARGET = 0.48) + Epistemic Watchdog (synapse_edge_watchdog.py)
+app.get("/api/watchdog/epistemic-ledger", (_req, res) => {
+  try {
+    const stateDir = path.join(process.cwd(), ".silver_state");
+    const committedPath = path.join(stateDir, "silver_committed_ledger.jsonl");
+    const quarantinePath = path.join(stateDir, "silver_scratchpad_quarantine.jsonl");
+
+    const readJsonl = (filePath: string) => {
+      if (!fs.existsSync(filePath)) return [];
+      return fs
+        .readFileSync(filePath, "utf-8")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+        .reverse();
+    };
+
+    const committed = readJsonl(committedPath);
+    const quarantined = readJsonl(quarantinePath);
+
+    return res.json({
+      success: true,
+      rTarget: 0.48,
+      rTolerance: 0.06,
+      committedCount: committed.length,
+      quarantinedCount: quarantined.length,
+      committed: committed.slice(0, 25),
+      quarantined: quarantined.slice(0, 25),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+app.post("/api/watchdog/epistemic-evaluate", (req, res) => {
+  try {
+    const { promptId, modelOutput, noveltyShock } = req.body || {};
+    if (!modelOutput || typeof modelOutput !== "string") {
+      return res.status(400).json({ error: "modelOutput string is required" });
+    }
+    const safePromptId = String(promptId || `epistemic-${Date.now()}`);
+    const safeNovelty = Number.isFinite(Number(noveltyShock)) ? Number(noveltyShock) : 0.04;
+
+    const pyScript = `
+import json, sys
+from pathlib import Path
+from synapse_edge_watchdog import EpistemicWatchdog
+
+payload = json.loads(sys.stdin.read())
+wd = EpistemicWatchdog(state_dir=Path(".silver_state"))
+receipt = wd.evaluate_and_route(
+    prompt_id=payload["promptId"],
+    model_output=payload["modelOutput"],
+    novelty_shock=float(payload["noveltyShock"]),
+)
+from dataclasses import asdict
+print(json.dumps(asdict(receipt)))
+`;
+    const proc = spawnSync("python3", ["-c", pyScript], {
+      cwd: process.cwd(),
+      input: JSON.stringify({
+        promptId: safePromptId,
+        modelOutput,
+        noveltyShock: safeNovelty,
+      }),
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+
+    if (proc.status !== 0) {
+      return res.status(500).json({
+        error: (proc.stderr || proc.stdout || "synapse_edge_watchdog.py execution failed").trim(),
+      });
+    }
+
+    const receipt = JSON.parse(proc.stdout.trim());
+    return res.json({
+      success: true,
+      receipt,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
 
 app.post("/api/watchdog/separation-of-authority-audit", watchdogEvalRateLimiter, (_req, res) => {
   try {

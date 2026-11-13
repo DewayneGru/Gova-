@@ -239,6 +239,91 @@ export const AntigravityBridgeWorkspace: React.FC = () => {
   const [isApplyingPatch, setIsApplyingPatch] = useState<boolean>(false);
   const [lastPatchStat, setLastPatchStat] = useState<string | null>(null);
   const { quotaState, refreshQuotaState } = useQuotaPauseState();
+  const [epistemicLedger, setEpistemicLedger] = useState<{
+    committedCount: number;
+    quarantinedCount: number;
+    committed: any[];
+    quarantined: any[];
+  }>({ committedCount: 0, quarantinedCount: 0, committed: [], quarantined: [] });
+  const [isEvaluatingEpistemic, setIsEvaluatingEpistemic] = useState(false);
+  const [lastEpistemicReceipt, setLastEpistemicReceipt] = useState<any | null>(null);
+
+  const refreshEpistemicLedger = async () => {
+    try {
+      const res = await fetch("/api/watchdog/epistemic-ledger");
+      if (res.ok) {
+        const data = await res.json();
+        setEpistemicLedger({
+          committedCount: data.committedCount || 0,
+          quarantinedCount: data.quarantinedCount || 0,
+          committed: Array.isArray(data.committed) ? data.committed : [],
+          quarantined: Array.isArray(data.quarantined) ? data.quarantined : [],
+        });
+      }
+    } catch {
+      // Ignore if offline
+    }
+  };
+
+  useEffect(() => {
+    refreshEpistemicLedger();
+  }, []);
+
+  const handleRunEpistemicSample = async (mode: "VERIFIED" | "HYPOTHESIS") => {
+    setIsEvaluatingEpistemic(true);
+    try {
+      const sampleOutput =
+        mode === "VERIFIED"
+          ? `\`\`\`json
+{
+  "steering_mode_honored": "HOLD_CRITICAL_EDGE",
+  "claim_status": "VERIFIED",
+  "core_mechanism": "Asymmetric STDP with homeostatic threshold scaling stabilizes branching ratio sigma near 1.0 under Kuramoto R_TARGET = 0.48.",
+  "invariants_checked": ["Lyapunov boundedness", "Causal spike ordering", "CSR/CSC index bijection"],
+  "hidden_assumptions": ["Stationary Poisson background input rate"],
+  "falsification_test": "Inject 3x synchronous burst; verify R recovers to [0.42, 0.54] within 25 ticks.",
+  "ready_for_ledger_commit": true
+}
+\`\`\`
+Derivation complete and verified.`
+          : `\`\`\`json
+{
+  "steering_mode_honored": "EXPLORE_DIVERGE",
+  "claim_status": "HYPOTHESIS",
+  "core_mechanism": "Speculative holographic phase-locking across unverified multi-compartment dendrites.",
+  "invariants_checked": ["Dimensional consistency"],
+  "hidden_assumptions": ["Zero axonal conduction delay"],
+  "falsification_test": "Sweep conduction delay from 0.5 ms to 5.0 ms and measure phase coherence.",
+  "ready_for_ledger_commit": false
+}
+\`\`\`
+Exploratory scratchpad hypothesis.`;
+
+      const res = await fetch("/api/watchdog/epistemic-evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promptId: `gova-${mode.toLowerCase()}-${Date.now().toString().slice(-4)}`,
+          modelOutput: sampleOutput,
+          noveltyShock: mode === "VERIFIED" ? 0.04 : 0.18,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.receipt) {
+        setLastEpistemicReceipt(data.receipt);
+        setStatusBanner(
+          data.receipt.committed
+            ? `Epistemic Watchdog COMMITTED to silver_committed_ledger.jsonl (R=${data.receipt.order_parameter_r}, leaf=${data.receipt.merkle_leaf_hex.slice(0, 12)}…)`
+            : `Epistemic Watchdog QUARANTINED to silver_scratchpad_quarantine.jsonl (${data.receipt.quarantine_reason})`
+        );
+        await refreshEpistemicLedger();
+      }
+    } catch (err: any) {
+      setStatusBanner(`Epistemic evaluation error: ${err?.message || String(err)}`);
+    } finally {
+      setIsEvaluatingEpistemic(false);
+    }
+  };
 
   const [chatHistory, setChatHistory] = useState<BridgeChatMessage[]>(() => {
     try {
@@ -1175,6 +1260,112 @@ export const AntigravityBridgeWorkspace: React.FC = () => {
                   <Play className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Run Harness & Update Telemetry</span>
                 </button>
+              </div>
+
+              {/* Unified Kuramoto Governor (R_TARGET = 0.48) + Epistemic Watchdog (synapse_edge_watchdog.py) */}
+              <div className="p-4 rounded-xl border border-emerald-500/30 bg-slate-900/70 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <span>
+                        Unified Kuramoto Governor (R_TARGET = 0.48) + Epistemic Watchdog (synapse_edge_watchdog.py)
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400">
+                      Signs verified claims with SHA-256(&quot;leaf:&quot; || rawBody) + HMAC-SHA256 • Isolates hypotheses to scratchpad quarantine
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isEvaluatingEpistemic}
+                      onClick={() => handleRunEpistemicSample("VERIFIED")}
+                      className="px-2.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-mono font-semibold transition"
+                    >
+                      Test VERIFIED Commit
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isEvaluatingEpistemic}
+                      onClick={() => handleRunEpistemicSample("HYPOTHESIS")}
+                      className="px-2.5 py-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 text-xs font-mono font-semibold transition"
+                    >
+                      Test HYPOTHESIS Quarantine
+                    </button>
+                  </div>
+                </div>
+
+                {lastEpistemicReceipt && (
+                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div>
+                      <span className="text-slate-500 block">Status</span>
+                      <span className={lastEpistemicReceipt.committed ? "text-emerald-400 font-semibold" : "text-amber-400 font-semibold"}>
+                        {lastEpistemicReceipt.committed ? "COMMITTED" : `QUARANTINED (${lastEpistemicReceipt.quarantine_reason})`}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Kuramoto R / K</span>
+                      <span className="text-slate-100">
+                        {lastEpistemicReceipt.order_parameter_r} / K={lastEpistemicReceipt.coupling_k}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Steering Mode</span>
+                      <span className="text-indigo-300">{lastEpistemicReceipt.steering_directive}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Merkle Leaf</span>
+                      <span className="text-emerald-300">{String(lastEpistemicReceipt.merkle_leaf_hex).slice(0, 16)}…</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
+                  <div className="p-3 rounded-lg bg-slate-950 border border-emerald-500/20 space-y-1.5">
+                    <div className="flex items-center justify-between text-emerald-300 font-semibold">
+                      <span>.silver_state/silver_committed_ledger.jsonl</span>
+                      <span>{epistemicLedger.committedCount} records</span>
+                    </div>
+                    {epistemicLedger.committed.slice(0, 2).map((item, i) => (
+                      <div key={i} className="p-2 rounded bg-slate-900/90 border border-slate-800 text-[11px] space-y-0.5">
+                        <div className="flex justify-between text-slate-300">
+                          <span className="font-semibold text-emerald-400">{item.prompt_id}</span>
+                          <span>R={item.kuramoto?.order_parameter_r} • K={item.kuramoto?.coupling_k}</span>
+                        </div>
+                        <div className="text-slate-400 truncate">{item.telemetry?.core_mechanism}</div>
+                        <div className="text-[10px] text-slate-500 truncate">
+                          leaf: {item.merkle_leaf_hex}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-slate-950 border border-amber-500/20 space-y-1.5">
+                    <div className="flex items-center justify-between text-amber-300 font-semibold">
+                      <span>.silver_state/silver_scratchpad_quarantine.jsonl</span>
+                      <span>{epistemicLedger.quarantinedCount} records</span>
+                    </div>
+                    {epistemicLedger.quarantined.length === 0 ? (
+                      <div className="text-[11px] text-slate-500 py-2">
+                        No quarantined records yet. Click &quot;Test HYPOTHESIS Quarantine&quot; to verify isolation.
+                      </div>
+                    ) : (
+                      epistemicLedger.quarantined.slice(0, 2).map((item, i) => (
+                        <div key={i} className="p-2 rounded bg-slate-900/90 border border-slate-800 text-[11px] space-y-0.5">
+                          <div className="flex justify-between text-slate-300">
+                            <span className="font-semibold text-amber-400">{item.prompt_id}</span>
+                            <span>{item.quarantine_reason}</span>
+                          </div>
+                          <div className="text-slate-400 truncate">{item.telemetry?.core_mechanism}</div>
+                          <div className="text-[10px] text-slate-500 truncate">
+                            leaf: {item.merkle_leaf_hex}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </section>
